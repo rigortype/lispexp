@@ -14,7 +14,7 @@ jobs:
     steps:
       # The corpus submodules under tests/corpus/ are large and not needed for
       # the unit tests — the corpus tests self-skip when they are absent.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
