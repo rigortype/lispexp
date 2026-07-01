@@ -83,12 +83,25 @@ impl<'a> Lexer<'a> {
             return Some(self.token(TokenKind::Whitespace, start));
         }
 
+        // Block comment — checked before the line comment so custom delimiters
+        // that share a lead char (AutoLISP `;|...|;` vs `;`) win.
+        if let Some(bc) = self.opts.block_comment {
+            if self.rest().starts_with(bc.open) {
+                return Some(self.lex_block_comment(start, bc.open, bc.close, bc.nestable));
+            }
+        }
+
         // Line comment.
         if c == self.opts.line_comment {
             while !matches!(self.peek(), Some('\n') | None) {
                 self.bump();
             }
             return Some(self.token(TokenKind::LineComment, start));
+        }
+
+        // Backtick long string (Janet).
+        if c == '`' && self.opts.long_string_backtick {
+            return Some(self.lex_backtick_string(start));
         }
 
         // Delimiters.
@@ -197,7 +210,74 @@ impl<'a> Lexer<'a> {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Meta));
         }
+        if Some(c) == self.opts.splice {
+            self.bump();
+            return Some(TokenKind::Prefix(Prefix::Splice));
+        }
+        if Some(c) == self.opts.mutable {
+            self.bump();
+            return Some(TokenKind::Prefix(Prefix::Mutable));
+        }
+        if Some(c) == self.opts.short_fn {
+            self.bump();
+            return Some(TokenKind::Prefix(Prefix::HashFn));
+        }
         None
+    }
+
+    /// Lex a Janet backtick long string: a run of N backticks, closed by the
+    /// next run of at least N backticks. No escapes.
+    fn lex_backtick_string(&mut self, start: usize) -> Token {
+        let mut open = 0;
+        while self.peek() == Some('`') {
+            self.bump();
+            open += 1;
+        }
+        loop {
+            match self.peek() {
+                None => return self.token(TokenKind::Error, start),
+                Some('`') => {
+                    let mut close = 0;
+                    while self.peek() == Some('`') {
+                        self.bump();
+                        close += 1;
+                    }
+                    if close >= open {
+                        return self.token(TokenKind::Str, start);
+                    }
+                }
+                Some(_) => {
+                    self.bump();
+                }
+            }
+        }
+    }
+
+    /// Lex a Hy bracket string `#[DELIM[...]DELIM]`. The `#` is already consumed;
+    /// the current char is the first `[`.
+    fn lex_bracket_string(&mut self, start: usize) -> Token {
+        self.bump(); // first '['
+        let delim_start = self.pos;
+        while !matches!(self.peek(), Some('[') | None) {
+            self.bump();
+        }
+        if self.peek() != Some('[') {
+            return self.token(TokenKind::Error, start);
+        }
+        let closer = format!("]{}]", &self.src[delim_start..self.pos]);
+        self.bump(); // second '['
+        loop {
+            if self.rest().is_empty() {
+                return self.token(TokenKind::Error, start);
+            }
+            if self.rest().starts_with(&closer) {
+                for _ in 0..closer.chars().count() {
+                    self.bump();
+                }
+                return self.token(TokenKind::Str, start);
+            }
+            self.bump();
+        }
     }
 
     fn lex_string(&mut self, start: usize) -> Token {
@@ -259,13 +339,6 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Block comment (delimiters may be `#|`..`|#`).
-        if let Some(bc) = self.opts.block_comment {
-            if self.rest().starts_with(bc.open) {
-                return self.lex_block_comment(start, bc.open, bc.close, bc.nestable);
-            }
-        }
-
         self.bump(); // consume '#'
         match self.peek() {
             Some(';') if self.opts.datum_comment => {
@@ -318,6 +391,10 @@ impl<'a> Lexer<'a> {
             Some('{') if self.opts.set_literal => {
                 self.bump();
                 self.token(TokenKind::Open(Delim::Set), start)
+            }
+            Some('[') if self.opts.bracket_string => {
+                // Hy bracket string `#[[...]]` / `#[DELIM[...]DELIM]`.
+                self.lex_bracket_string(start)
             }
             Some('[') if self.opts.square.is_delimiter() => {
                 // Emacs Lisp byte-code objects / Racket `#[...]` vectors — a hash

@@ -65,6 +65,9 @@ pub enum Dialect {
     CommonLisp,
     EmacsLisp,
     Racket,
+    Janet,
+    Hy,
+    AutoLisp,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -138,6 +141,16 @@ pub struct Options {
     pub deref: Option<char>,
     /// Glyph for a metadata prefix (Clojure `^`), if any.
     pub meta: Option<char>,
+    /// Glyph for a splice prefix (Janet `;`), if any.
+    pub splice: Option<char>,
+    /// Glyph for a mutable-marker prefix (Janet `@`), if any.
+    pub mutable: Option<char>,
+    /// Glyph for a bare short-function prefix (Janet `|`), if any.
+    pub short_fn: Option<char>,
+    /// Whether a run of backticks delimits a long string (Janet).
+    pub long_string_backtick: bool,
+    /// Whether `#[DELIM[...]DELIM]` is a bracket string (Hy).
+    pub bracket_string: bool,
 }
 
 impl Options {
@@ -182,6 +195,11 @@ impl Options {
             splicing_suffix: '@',
             deref: None,
             meta: None,
+            splice: None,
+            mutable: None,
+            short_fn: None,
+            long_string_backtick: false,
+            bracket_string: false,
         }
     }
 
@@ -220,6 +238,11 @@ impl Options {
             splicing_suffix: '@',
             deref: Some('@'),
             meta: Some('^'),
+            splice: None,
+            mutable: None,
+            short_fn: None,
+            long_string_backtick: false,
+            bracket_string: false,
         }
     }
 
@@ -263,6 +286,11 @@ impl Options {
             splicing_suffix: '@',
             deref: None,
             meta: None,
+            splice: None,
+            mutable: None,
+            short_fn: None,
+            long_string_backtick: false,
+            bracket_string: false,
         }
     }
 
@@ -301,6 +329,11 @@ impl Options {
             splicing_suffix: '@',
             deref: None,
             meta: None,
+            splice: None,
+            mutable: None,
+            short_fn: None,
+            long_string_backtick: false,
+            bracket_string: false,
         }
     }
 
@@ -320,6 +353,78 @@ impl Options {
         }
     }
 
+    /// Janet. Note: `#` is the line comment, `;` is splice, `~` is quasiquote.
+    pub fn janet() -> Self {
+        Options {
+            line_comment: '#',
+            block_comment: None,
+            datum_comment: false,
+            hash_syntax: false,      // `#` is the comment char, not reader syntax
+            square: DelimRole::List, // `[...]` bracketed tuple
+            curly: DelimRole::Map,   // `{...}` struct
+            booleans: false,
+            char_syntax: None,
+            hash_paren: HashParen::None,
+            keyword_colon: true,
+            piped_symbols: false,
+            datum_labels: false,
+            dotted_pairs: false,
+            quasiquote: Some('~'),
+            unquote: Some(','),
+            splice: Some(';'),
+            mutable: Some('@'), // `@[]` array, `@{}` table, `@"..."` buffer
+            short_fn: Some('|'),
+            long_string_backtick: true, // `` `...` ``
+            ..Options::scheme()
+        }
+    }
+
+    /// Hy (a Lisp that compiles to Python).
+    pub fn hy() -> Self {
+        Options {
+            block_comment: None,
+            datum_comment: false,
+            discard_underscore: true, // #_
+            square: DelimRole::List,  // `[...]` list
+            curly: DelimRole::Map,    // `{...}` dict
+            set_literal: true,        // #{}
+            tagged_literals: true,    // #foo reader macros, #* #**
+            booleans: false,          // True/False/None are symbols
+            char_syntax: None,
+            hash_paren: HashParen::None,
+            keyword_colon: true,
+            piped_symbols: false,
+            datum_labels: false,
+            dotted_pairs: false,  // `.` is attribute access
+            unquote: Some('~'),   // Clojure-style unquote
+            bracket_string: true, // #[[...]] / #[DELIM[...]DELIM]
+            ..Options::scheme()
+        }
+    }
+
+    /// AutoLISP (AutoCAD). Minimal: `'` quote only, `;|...|;` block comments,
+    /// no character literals, no reader syntax.
+    pub fn autolisp() -> Self {
+        Options {
+            block_comment: Some(BlockComment {
+                open: ";|",
+                close: "|;",
+                nestable: false,
+            }),
+            datum_comment: false,
+            hash_syntax: false,
+            square: DelimRole::Ordinary,
+            booleans: false, // T / nil are symbols
+            char_syntax: None,
+            hash_paren: HashParen::None,
+            piped_symbols: false,
+            datum_labels: false,
+            quasiquote: None, // no backquote/unquote in AutoLISP
+            unquote: None,
+            ..Options::scheme()
+        }
+    }
+
     /// Options for a named [`Dialect`].
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
@@ -328,6 +433,9 @@ impl Options {
             Dialect::CommonLisp => Options::common_lisp(),
             Dialect::EmacsLisp => Options::emacs_lisp(),
             Dialect::Racket => Options::racket(),
+            Dialect::Janet => Options::janet(),
+            Dialect::Hy => Options::hy(),
+            Dialect::AutoLisp => Options::autolisp(),
         }
     }
 }
