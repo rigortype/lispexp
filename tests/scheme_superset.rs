@@ -175,12 +175,15 @@ fn bare_colon_is_a_keyword() {
 }
 
 #[test]
-fn numeric_atom_with_trailing_colon_stays_a_number() {
-    // SRFI-88 keywords are an *identifier* + `:`; a numeric-looking atom keeps
-    // the Number classification it has under strict R7RS (no kind flip).
+fn trailing_colon_atoms_classify_by_lexical_shape() {
+    // Classification is lexical-shape-only (L5): `1:`/`−2:` are not a valid
+    // numeric shape (the `:` breaks the numeric body), so they fall to the
+    // trailing-colon keyword rule rather than being forced to Number by a bare
+    // leading digit. A `#`-radix number keeps its Number shape (`#xFF:`). Either
+    // way each stays a single leaf, so there is no reader sync loss.
     let data = sup("1: -2: #xFF:");
-    assert_eq!(data[0].kind, DatumKind::Number("1:"));
-    assert_eq!(data[1].kind, DatumKind::Number("-2:"));
+    assert_eq!(data[0].kind, DatumKind::Keyword("1:"));
+    assert_eq!(data[1].kind, DatumKind::Keyword("-2:"));
     assert_eq!(data[2].kind, DatumKind::Number("#xFF:"));
 }
 

@@ -126,3 +126,14 @@ fn no_lang_line_when_absent() {
     let parsed = rkt_parsed("(+ 1 2)");
     assert_eq!(parsed.lang_line, None);
 }
+
+#[test]
+fn hash_map_literal_is_one_unit() {
+    // Racket `#hash((a . 1))` is one hash literal, not `#hash` + a list (L3).
+    let data = rkt("#hash((a . 1))");
+    let DatumKind::HashLiteral { tag, inner } = &data[0].kind else {
+        panic!("expected hash literal, got {:?}", data[0].kind)
+    };
+    assert_eq!(*tag, "hash");
+    assert!(inner.is_some());
+}

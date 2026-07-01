@@ -76,3 +76,14 @@ fn square_brackets_are_ordinary_symbol_chars() {
     assert_eq!(data.len(), 1);
     assert_eq!(data[0].kind, DatumKind::Symbol("[a]"));
 }
+
+#[test]
+fn array_literal_is_one_hash_literal() {
+    // ISLisp `#3a((1)(2))` is one hash literal, not `#3a` + a list (L3).
+    let data = isl("#3a((1)(2))");
+    let DatumKind::HashLiteral { tag, inner } = &data[0].kind else {
+        panic!("expected hash literal, got {:?}", data[0].kind)
+    };
+    assert_eq!(*tag, "3a");
+    assert!(inner.is_some());
+}

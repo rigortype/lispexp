@@ -456,6 +456,17 @@ impl<'a> Lexer<'a> {
                     self.token(TokenKind::Error, start)
                 }
             }
+            Some('{') if self.opts.hash_curly_symbol => {
+                // Guile `#{foo bar}#` extended symbol (ADR-0016): one verbatim
+                // Atom token, delimiters included (like piped symbols keep their
+                // bars). Mutually exclusive with `set_literal` (both claim `#{`);
+                // guile() sets `set_literal = false`.
+                debug_assert!(
+                    !self.opts.set_literal,
+                    "hash_curly_symbol and set_literal both claim `#{{`"
+                );
+                self.lex_hash_curly_symbol(start)
+            }
             Some('{') if self.opts.set_literal => {
                 self.bump();
                 self.token(TokenKind::Open(Delim::Set), start)
@@ -517,21 +528,21 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::HashOpen(Delim::Round), start)
             }
-            Some('t') if self.opts.booleans => {
-                self.bump();
-                if self.rest().starts_with("rue") {
-                    self.bump();
-                    self.bump();
+            Some('t') if self.opts.booleans && self.boolean_len("t", "true").is_some() => {
+                // `#t` / `#true` — only when properly terminated (L2), so
+                // `#thing` and `#true-ish` fall through to the hash-atom path.
+                let len = self.boolean_len("t", "true").unwrap();
+                for _ in 0..len {
                     self.bump();
                 }
                 self.token(TokenKind::Bool(true), start)
             }
-            Some('f') if self.opts.booleans => {
-                self.bump();
-                if self.rest().starts_with("alse") {
-                    for _ in 0..4 {
-                        self.bump();
-                    }
+            Some('f') if self.opts.booleans && self.boolean_len("f", "false").is_some() => {
+                // `#f` / `#false` — only when properly terminated (L2), so
+                // SRFI-4 `#f64(...)` falls through to the hash-atom path.
+                let len = self.boolean_len("f", "false").unwrap();
+                for _ in 0..len {
+                    self.bump();
                 }
                 self.token(TokenKind::Bool(false), start)
             }
@@ -554,16 +565,82 @@ impl<'a> Lexer<'a> {
             }
             Some(_) if self.opts.tagged_literals => {
                 // `#inst`, `#uuid`, `#:ns`, custom `#tag` — attach to next datum.
+                // But `#tag(` with the delimiter *immediately* after the tag is
+                // one identifiable hash literal, not a `#tag` marker plus a
+                // separate list (L3, ADR-0011).
                 self.consume_atom_body();
-                self.token(TokenKind::HashTag, start)
+                if let Some(delim) = self.active_open_delim() {
+                    self.bump();
+                    self.token(TokenKind::HashOpen(delim), start)
+                } else {
+                    self.token(TokenKind::HashTag, start)
+                }
             }
             _ => {
                 // Directives (#!fold-case) and any other #form — capture without
-                // choking (ADR-0011). Treated as an atom.
+                // choking (ADR-0011). Treated as an atom. `#tag(` with the open
+                // delimiter right after the tag is one hash literal (L3):
+                // `#hash((a . 1))`, `#3a((1)(2))`, `#s(...)`, `#f64(1 2)`.
                 self.consume_atom_body();
-                self.token(TokenKind::Atom, start)
+                if let Some(delim) = self.active_open_delim() {
+                    self.bump();
+                    self.token(TokenKind::HashOpen(delim), start)
+                } else {
+                    self.token(TokenKind::Atom, start)
+                }
             }
         }
+    }
+
+    /// Lex a Guile `#{foo bar}#` extended symbol (ADR-0016). The `#` is already
+    /// consumed; the cursor is at `{`. Scans to the closing `}#` and emits one
+    /// verbatim [`TokenKind::Atom`] (delimiters included). Unterminated input
+    /// yields an [`TokenKind::Error`] leaf.
+    fn lex_hash_curly_symbol(&mut self, start: usize) -> Token {
+        self.bump(); // '{'
+        loop {
+            match self.peek() {
+                None => return self.token(TokenKind::Error, start),
+                Some('}') if self.rest().starts_with("}#") => {
+                    self.bump(); // '}'
+                    self.bump(); // '#'
+                    return self.token(TokenKind::Atom, start);
+                }
+                Some(_) => {
+                    self.bump();
+                }
+            }
+        }
+    }
+
+    /// The [`Delim`] the cursor's char opens, if it is an active open delimiter
+    /// under the dialect's roles (`(` always; `[`/`{` only when their role is a
+    /// delimiter). Used to fold `#tag(` into a single `HashOpen` (L3).
+    fn active_open_delim(&self) -> Option<Delim> {
+        match self.peek() {
+            Some('(') => Some(Delim::Round),
+            Some('[') if self.square_active() => Some(Delim::Square),
+            Some('{') if self.curly_active() => Some(Delim::Curly),
+            _ => None,
+        }
+    }
+
+    /// If the cursor (just past `#`) spells the `long` boolean (`true`/`false`)
+    /// or its `short` form (`t`/`f`) *and* is followed by a terminator or EOF,
+    /// return the char count to consume. Otherwise `None`, so `#thing` /
+    /// `#f64(...)` fall through to the hash-atom path (L2).
+    fn boolean_len(&self, short: &str, long: &str) -> Option<usize> {
+        let rest = self.rest();
+        for spelling in [long, short] {
+            if let Some(after) = rest.strip_prefix(spelling) {
+                match after.chars().next() {
+                    None => return Some(spelling.chars().count()),
+                    Some(c) if self.is_terminator(c) => return Some(spelling.chars().count()),
+                    _ => {}
+                }
+            }
+        }
+        None
     }
 
     fn lex_block_comment(
@@ -617,29 +694,56 @@ impl<'a> Lexer<'a> {
     }
 
     /// Lex an Emacs Lisp `?`-style character literal: `?a`, `?(`, `?\n`,
-    /// `?\C-x`, `?\^I`, `?\x41`. `?` followed by any single char is that char;
-    /// after `?\` a modifier/named/hex/octal run may follow.
+    /// `?\C-x`, `?\^I`, `?\x41`, and modifier chains `?\C-\M-x` / `?\M-\C-b`.
+    /// `?` followed by any single char is that char; after `?\` a run of
+    /// modifier escapes (`\C-`, `\M-`, `\S-`, `\H-`, `\s-`, `\A-`) may precede a
+    /// final char, which may itself be an escape (`\n`, `\^X`, `\x41`, ...).
     fn lex_question_char(&mut self, start: usize) -> Token {
         self.bump(); // '?'
-        match self.peek() {
-            Some('\\') => {
+        if self.peek() == Some('\\') {
+            // Consume a chain of modifier escapes (`\C-`, `\M-`, ...), then the
+            // final char, which may be a bare char (`?\C-c`) or itself an escape
+            // (`?\C-\n`, `?\M-\^I`, `?\x41`).
+            while self.consume_modifier_escape() {}
+            if self.peek() == Some('\\') {
                 self.bump(); // '\'
                 if let Some(c) = self.bump() {
-                    // Modifier (C-, M-, ^), named, hex, or octal escapes.
-                    if c.is_alphanumeric() || c == '-' || c == '^' {
-                        while matches!(self.peek(), Some(c) if c.is_alphanumeric() || c == '-' || c == '^')
-                        {
+                    // Named/hex/octal escape body: keep alnums (`\x41`, `\251`,
+                    // `\newline`), and a leading `^` control form (`\^I`).
+                    if c == '^' {
+                        self.bump(); // the controlled char
+                    } else if c.is_alphanumeric() {
+                        while matches!(self.peek(), Some(c) if c.is_alphanumeric()) {
                             self.bump();
                         }
                     }
                 }
+            } else {
+                self.bump(); // the final bare char after the modifier chain
             }
-            Some(_) => {
-                self.bump(); // a single literal char, e.g. ?( ?; ?)
-            }
-            None => {}
+        } else if self.peek().is_some() {
+            self.bump(); // a single literal char, e.g. ?( ?; ?)
         }
         self.token(TokenKind::Char, start)
+    }
+
+    /// If the input at the cursor is a modifier escape (`\C-`, `\M-`, `\S-`,
+    /// `\H-`, `\s-`, `\A-`), consume it and return `true`; otherwise leave the
+    /// cursor untouched and return `false`.
+    fn consume_modifier_escape(&mut self) -> bool {
+        let mut chars = self.rest().chars();
+        if chars.next() != Some('\\') {
+            return false;
+        }
+        let modifier = matches!(chars.next(), Some('C' | 'M' | 'S' | 'H' | 's' | 'A'));
+        if modifier && chars.next() == Some('-') {
+            self.bump(); // '\'
+            self.bump(); // modifier letter
+            self.bump(); // '-'
+            true
+        } else {
+            false
+        }
     }
 
     fn lex_label(&mut self, start: usize) -> Token {
@@ -655,7 +759,19 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::LabelRef, start)
             }
-            _ => self.token(TokenKind::Atom, start),
+            _ => {
+                // Not a label: a `#<digits>...` atom such as a radix-`r` number
+                // (`#36rHELLO`, `#2r1010`) or an array literal (`#3a(...)`).
+                // Consume the whole atom body, then fold a trailing `#tag(` into
+                // a single `HashOpen` (L3).
+                self.consume_atom_body();
+                if let Some(delim) = self.active_open_delim() {
+                    self.bump();
+                    self.token(TokenKind::HashOpen(delim), start)
+                } else {
+                    self.token(TokenKind::Atom, start)
+                }
+            }
         }
     }
 

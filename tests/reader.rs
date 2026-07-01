@@ -250,3 +250,61 @@ fn hash_vector_inner_quote_not_folded() {
     assert_eq!(items[0].kind, DatumKind::Symbol("quote"));
     assert_eq!(items[1].kind, DatumKind::Symbol("x"));
 }
+
+#[test]
+fn bool_requires_terminator() {
+    // `#thing` is not `#t` + `hing`; without a terminator after `#t`/`#f` it
+    // falls through to the hash-atom path (L2).
+    let data = scheme("#thing");
+    assert_eq!(data.len(), 1, "expected one atom, got {:?}", data);
+    assert!(
+        !matches!(data[0].kind, DatumKind::Bool(_)),
+        "`#thing` must not lex as a boolean: {:?}",
+        data[0].kind
+    );
+    // Properly terminated booleans still work.
+    assert_eq!(scheme("#t #f #true #false").len(), 4);
+    assert_eq!(scheme("#t")[0].kind, DatumKind::Bool(true));
+    assert_eq!(scheme("#false")[0].kind, DatumKind::Bool(false));
+}
+
+#[test]
+fn srfi4_bytevector_tag_is_one_hash_literal() {
+    // SRFI-4 `#f64(1.0 2.0)` — `#f` is not a boolean here (L2); `#f64(` is one
+    // hash literal (L3), not Bool + Number + List.
+    let data = scheme("#f64(1.0 2.0)");
+    assert_eq!(data.len(), 1, "expected one datum, got {:?}", data);
+    let DatumKind::HashLiteral { tag, inner } = &data[0].kind else {
+        panic!("expected hash literal, got {:?}", data[0].kind)
+    };
+    assert_eq!(*tag, "f64");
+    let DatumKind::List { items, .. } = &inner.as_ref().unwrap().kind else {
+        panic!("expected inner list")
+    };
+    assert_eq!(items.len(), 2);
+}
+
+#[test]
+fn radix_r_number_classifies() {
+    // `#36rHELLO` / `#2r1010` are numbers (L3b).
+    let data = scheme("#36rHELLO #2r1010");
+    assert_eq!(data[0].kind, DatumKind::Number("#36rHELLO"));
+    assert_eq!(data[1].kind, DatumKind::Number("#2r1010"));
+}
+
+#[test]
+fn digit_led_symbols_are_symbols() {
+    // `1+`, `1-`, `1x` are the symbols Lisp uses, not numbers (L5); real numbers
+    // still classify.
+    let data = scheme("1+ 1- 1x 1 1.5 -2/3 1e-5 .5 #xFF");
+    let kinds: Vec<_> = data.iter().map(|d| &d.kind).collect();
+    assert_eq!(*kinds[0], DatumKind::Symbol("1+"));
+    assert_eq!(*kinds[1], DatumKind::Symbol("1-"));
+    assert_eq!(*kinds[2], DatumKind::Symbol("1x"));
+    assert_eq!(*kinds[3], DatumKind::Number("1"));
+    assert_eq!(*kinds[4], DatumKind::Number("1.5"));
+    assert_eq!(*kinds[5], DatumKind::Number("-2/3"));
+    assert_eq!(*kinds[6], DatumKind::Number("1e-5"));
+    assert_eq!(*kinds[7], DatumKind::Number(".5"));
+    assert_eq!(*kinds[8], DatumKind::Number("#xFF"));
+}

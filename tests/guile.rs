@@ -61,3 +61,29 @@ fn define_list() {
     assert_eq!(data.len(), 1);
     assert!(matches!(data[0].kind, DatumKind::List { .. }));
 }
+
+#[test]
+fn hash_curly_extended_symbol_is_one_symbol() {
+    // Guile `#{foo bar}#` is a single verbatim symbol (ADR-0016, L4).
+    let data = guile("#{foo bar}#");
+    assert_eq!(data.len(), 1, "expected one symbol, got {:?}", data);
+    assert_eq!(data[0].kind, DatumKind::Symbol("#{foo bar}#"));
+}
+
+#[test]
+fn hash_curly_symbol_tiles_the_input() {
+    // The extended symbol plus a following form: the token stream stays tiled
+    // (no bytes lost or double-counted).
+    use lispexp::{lex, Options};
+    let src = "#{a b}# x";
+    let opts = Options::guile();
+    let mut cursor = 0u32;
+    for t in lex(src, &opts) {
+        assert_eq!(t.span.start, cursor, "gap/overlap at {t:?}");
+        cursor = t.span.end;
+    }
+    assert_eq!(cursor as usize, src.len());
+    let data = guile(src);
+    assert_eq!(data[0].kind, DatumKind::Symbol("#{a b}#"));
+    assert_eq!(data[1].kind, DatumKind::Symbol("x"));
+}

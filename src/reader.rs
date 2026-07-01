@@ -661,6 +661,10 @@ fn close_matches(open: Delim, close: Delim) -> bool {
 }
 
 fn classify_atom<'a>(text: &'a str, opts: &Options) -> DatumKind<'a> {
+    // Guile `#{foo bar}#` extended symbol (ADR-0016): a verbatim symbol leaf.
+    if opts.hash_curly_symbol && text.starts_with("#{") {
+        return DatumKind::Symbol(text);
+    }
     if opts.hash_keyword && text.starts_with("#:") {
         return DatumKind::Keyword(text);
     }
@@ -680,8 +684,11 @@ fn classify_atom<'a>(text: &'a str, opts: &Options) -> DatumKind<'a> {
     DatumKind::Symbol(text)
 }
 
-/// Coarse "is this a number in Scheme" check (ADR: value never interpreted).
-/// Deliberately conservative — ambiguous atoms fall back to `Symbol`.
+/// Coarse, **lexical-shape-only** "is this a number" check (ADR: value never
+/// interpreted). Classification looks solely at the token's shape; anything
+/// ambiguous falls back to `Symbol`. In particular a leading digit is *not*
+/// sufficient — `1+`, `1-`, `1x` are the symbols Lisp uses them as, not numbers
+/// (L5).
 fn looks_like_number(s: &str) -> bool {
     let b = s.as_bytes();
     if b.is_empty() {
@@ -691,8 +698,17 @@ fn looks_like_number(s: &str) -> bool {
     if s.starts_with("##") {
         return true;
     }
-    // Radix / exactness prefix: #x, #b, #e, ...
+    // Radix / exactness prefix: #x, #b, #e, ..., and radix-`r` numbers
+    // `#36rHELLO` / `#2r1010` (L3b).
     if b[0] == b'#' {
+        if let Some(rest) = s[1..].strip_prefix(|c: char| c.is_ascii_digit()) {
+            // `#<digits>r<alnum...>`: consume the rest of the leading digits,
+            // then require `r` and at least one alnum digit.
+            let after_digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+            if let Some(body) = after_digits.strip_prefix('r') {
+                return !body.is_empty() && body.bytes().all(|c| c.is_ascii_alphanumeric());
+            }
+        }
         return b.len() >= 2
             && matches!(
                 b[1].to_ascii_lowercase(),
@@ -706,11 +722,33 @@ fn looks_like_number(s: &str) -> bool {
     if i >= b.len() {
         return false; // lone + or -
     }
-    if b[i].is_ascii_digit() {
-        return true;
+    // The body must start with a digit, or `.<digit>` (`.5`). A leading letter
+    // or sign is not numeric.
+    let starts_numeric =
+        b[i].is_ascii_digit() || (b[i] == b'.' && i + 1 < b.len() && b[i + 1].is_ascii_digit());
+    if !starts_numeric {
+        return false;
     }
-    // .5 style
-    b[i] == b'.' && i + 1 < b.len() && b[i + 1].is_ascii_digit()
+    // Every remaining char must fit a plausible numeric body: digits, `.`, `/`
+    // (ratio), exponent markers (`e`/`s`/`f`/`d`/`l`), a sign only right after
+    // an exponent marker, and a trailing `i` (complex). Anything else — `1+`,
+    // `1-`, `1x` — makes it a symbol (L5).
+    let mut prev_exp_marker = false;
+    for (k, &c) in b[i..].iter().enumerate() {
+        let is_exp_marker = matches!(c.to_ascii_lowercase(), b'e' | b's' | b'f' | b'd' | b'l');
+        let ok = c.is_ascii_digit()
+            || c == b'.'
+            || c == b'/'
+            || is_exp_marker
+            || ((c == b'+' || c == b'-') && prev_exp_marker)
+            // Trailing `i` for a complex literal, only after a digit.
+            || (c.eq_ignore_ascii_case(&b'i') && k > 0 && b[i + k - 1].is_ascii_digit());
+        if !ok {
+            return false;
+        }
+        prev_exp_marker = is_exp_marker;
+    }
+    true
 }
 
 /// Byte offsets of the start of each line (line 1 begins at offset 0).

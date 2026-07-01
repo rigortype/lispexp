@@ -180,3 +180,41 @@ fn shorthands_are_read_verbatim() {
     let data = el("snu-foo");
     assert_eq!(data[0].kind, DatumKind::Symbol("snu-foo"));
 }
+
+#[test]
+fn modifier_chain_char_is_one_token() {
+    // `?\C-\M-x` and `?\M-\C-b` are single character literals, not a char plus a
+    // stray atom (L1).
+    let data = el("?\\C-\\M-x ?\\M-\\C-b");
+    assert_eq!(data.len(), 2, "expected two chars, got {:?}", data);
+    assert_eq!(data[0].kind, DatumKind::Char("?\\C-\\M-x"));
+    assert_eq!(data[1].kind, DatumKind::Char("?\\M-\\C-b"));
+}
+
+#[test]
+fn control_char_before_close_bracket() {
+    // `[?\C-c ?\C-c]`: the modifier char must not eat the closing `]` (L1
+    // regression from real magit code).
+    let data = el("[?\\C-c ?\\C-c]");
+    let DatumKind::List {
+        delim: Delim::Square,
+        items,
+        ..
+    } = &data[0].kind
+    else {
+        panic!("expected a vector, got {:?}", data[0].kind)
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, DatumKind::Char("?\\C-c"));
+}
+
+#[test]
+fn hash_s_struct_is_one_hash_literal() {
+    // `#s(hash-table ...)` is a single hash literal, not `#s` + a list (L3).
+    let data = el("#s(hash-table size 8)");
+    let DatumKind::HashLiteral { tag, inner } = &data[0].kind else {
+        panic!("expected hash literal, got {:?}", data[0].kind)
+    };
+    assert_eq!(*tag, "s");
+    assert!(inner.is_some());
+}
