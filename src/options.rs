@@ -2,7 +2,9 @@
 //!
 //! [`Options`] is the orthogonal, individually-toggleable syntax configuration
 //! the Lexer and Reader share (ADR-0003). A [`Dialect`] is just a named preset
-//! constructor. Scheme and Clojure are implemented so far.
+//! constructor. Scheme, Clojure, and Common Lisp are implemented so far.
+
+use crate::datum::Prefix;
 
 /// The role of a bracket pair `[]` or `{}` in a dialect.
 ///
@@ -58,6 +60,7 @@ pub enum HashParen {
 pub enum Dialect {
     Scheme,
     Clojure,
+    CommonLisp,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -86,10 +89,18 @@ pub struct Options {
     pub regex_literal: bool,
     /// Whether `#tag <form>` is a tagged literal (Clojure `#inst`, `#uuid`, ...).
     pub tagged_literals: bool,
-    /// Whether `#'` is a var-quote prefix (Clojure, Common Lisp).
-    pub var_quote: bool,
-    /// Whether `#?`/`#?@` are reader conditionals (Clojure).
+    /// The prefix `#'` maps to, if any (Clojure `VarQuote`, Common Lisp
+    /// `FunctionQuote`).
+    pub hash_apostrophe: Option<Prefix>,
+    /// Whether `#?`/`#?@` are reader conditionals wrapping the next list (Clojure).
     pub reader_conditional: bool,
+    /// Whether `#+`/`#-` are feature conditionals: a feature test followed by a
+    /// guarded form (Common Lisp). The reader reads two data.
+    pub feature_conditional: bool,
+    /// Whether `#.` is a read-time-eval prefix (Common Lisp).
+    pub read_eval: bool,
+    /// Whether `\` escapes the next character inside a symbol (Common Lisp).
+    pub symbol_escape: bool,
     /// Whether `#t`/`#f`/`#true`/`#false` are booleans.
     pub booleans: bool,
     /// How character literals are written, if the dialect has them.
@@ -140,8 +151,11 @@ impl Options {
             set_literal: false,
             regex_literal: false,
             tagged_literals: false,
-            var_quote: false,
+            hash_apostrophe: None,
             reader_conditional: false,
+            feature_conditional: false,
+            read_eval: false,
+            symbol_escape: false,
             booleans: true,
             char_syntax: Some(CharSyntax::HashBackslash),
             hash_paren: HashParen::Vector,
@@ -172,8 +186,11 @@ impl Options {
             set_literal: true,
             regex_literal: true,
             tagged_literals: true,
-            var_quote: true,
+            hash_apostrophe: Some(Prefix::VarQuote),
             reader_conditional: true,
+            feature_conditional: false,
+            read_eval: false,
+            symbol_escape: false,
             booleans: false, // true/false/nil are ordinary symbols
             char_syntax: Some(CharSyntax::Backslash),
             hash_paren: HashParen::HashFn,
@@ -190,11 +207,52 @@ impl Options {
         }
     }
 
+    /// Common Lisp (ANSI).
+    pub fn common_lisp() -> Self {
+        Options {
+            line_comment: ';',
+            comma_is_whitespace: false,
+            block_comment: Some(BlockComment {
+                open: "#|",
+                close: "|#",
+                nestable: true,
+            }),
+            datum_comment: false,
+            discard_underscore: false,
+            hash_syntax: true,
+            // `[` `]` `{` `}` are not standard delimiters in CL.
+            square: DelimRole::Ordinary,
+            curly: DelimRole::Ordinary,
+            set_literal: false,
+            regex_literal: false,
+            tagged_literals: false,
+            hash_apostrophe: Some(Prefix::FunctionQuote), // #'fn
+            reader_conditional: false,
+            feature_conditional: true, // #+/#-
+            read_eval: true,           // #.
+            symbol_escape: true,       // foo\ bar
+            booleans: false,           // t / nil are ordinary symbols
+            char_syntax: Some(CharSyntax::HashBackslash),
+            hash_paren: HashParen::Vector, // #(...)
+            keyword_colon: true,           // :keyword
+            piped_symbols: true,           // |foo bar|
+            datum_labels: true,            // #n= / #n#
+            dotted_pairs: true,
+            quote: Some('\''),
+            quasiquote: Some('`'),
+            unquote: Some(','),
+            splicing_suffix: '@',
+            deref: None,
+            meta: None,
+        }
+    }
+
     /// Options for a named [`Dialect`].
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
             Dialect::Scheme => Options::scheme(),
             Dialect::Clojure => Options::clojure(),
+            Dialect::CommonLisp => Options::common_lisp(),
         }
     }
 }

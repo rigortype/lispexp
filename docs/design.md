@@ -217,9 +217,10 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
 
 ## Implementation status
 
-Implemented dialects: **Scheme** (`Options::scheme`) and **Clojure** (`Options::clojure`).
-Both are exercised by a real-world corpus under `tests/corpus/` (chibi-scheme:
-610 files; clojure/clojure: 142 files) — all parse with zero errors.
+Implemented dialects: **Scheme** (`Options::scheme`), **Clojure** (`Options::clojure`),
+and **Common Lisp** (`Options::common_lisp`). Each is exercised by a real-world
+corpus under `tests/corpus/` — chibi-scheme (610 files), clojure/clojure (142),
+cl-ppcre (23), and lem (627 CL files) — all parse with zero errors.
 
 Clojure first-cut simplifications (structure is always correct; these concern
 retained detail):
@@ -230,3 +231,13 @@ retained detail):
 - **Regex** `#"..."`: kept as a `Str` leaf (the raw slice starts with `#"`), not a
   distinct kind.
 - **Symbolic values** `##Inf` / `##-Inf` / `##NaN`: self-contained `Number` leaves.
+
+Common Lisp first-cut simplifications:
+
+- **Feature conditionals** `#+feature form` / `#-feature form`: read as two data; the
+  guarded form is wrapped as `Prefixed{ReaderConditional(sense), form}` and the feature
+  test is consumed but not retained.
+- **Dimensioned/typed literals** `#nA(...)`, `#*1010`, `#C(...)`, `#S(...)`, `#P"..."`,
+  `#:sym`: lexed as balanced leaves rather than modeled precisely (no parse error).
+- **Custom reader macros** (runtime `set-dispatch-macro-character`): fundamentally out
+  of a static reader's reach — such files are excluded from the corpus, not parsed.

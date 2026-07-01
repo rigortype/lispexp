@@ -41,6 +41,7 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
         errors: Vec::new(),
         keyword_colon: options.keyword_colon,
         dotted_pairs: options.dotted_pairs,
+        feature_conditional: options.feature_conditional,
     };
 
     let data = parser.parse_top_level();
@@ -64,6 +65,7 @@ struct Parser<'a> {
     errors: Vec<ParseError>,
     keyword_colon: bool,
     dotted_pairs: bool,
+    feature_conditional: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -162,6 +164,30 @@ impl<'a> Parser<'a> {
                 return Some(Datum {
                     kind: DatumKind::HashLiteral { tag, inner },
                     span: Span::new(t.span.start, end),
+                    line,
+                });
+            }
+            TokenKind::Prefix(Prefix::ReaderConditional(sense)) if self.feature_conditional => {
+                // Common Lisp `#+feature form` / `#-feature form`: read the
+                // feature test, then the guarded form. First cut: the feature
+                // test is consumed but not retained; the guarded form is kept so
+                // structure stays correct (one form).
+                let _feature = self.parse_datum();
+                let inner = match self.parse_datum() {
+                    Some(d) => d,
+                    None => {
+                        self.error(t.span, "reader conditional with no guarded form");
+                        return None;
+                    }
+                };
+                let span = Span::new(t.span.start, inner.span.end);
+                return Some(Datum {
+                    kind: DatumKind::Prefixed {
+                        prefix: Prefix::ReaderConditional(sense),
+                        notation: Notation::Shorthand,
+                        inner: Box::new(inner),
+                    },
+                    span,
                     line,
                 });
             }

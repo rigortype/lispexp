@@ -36,7 +36,9 @@ fn collect_files(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
 
 /// Parse every matching file under `root` with `opts`; assert zero parse errors.
 /// `min_files` guards against a hollow-green run (corpus missing or all skipped).
-fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize) {
+/// `exclude` lists repo-relative paths to skip — reserved for files that use
+/// runtime-defined custom reader macros, which a static reader cannot parse.
+fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize, exclude: &[&str]) {
     let root = corpus_dir(name);
     if !root.join(".git").exists() && !root.join("README.md").exists() {
         eprintln!(
@@ -50,6 +52,10 @@ fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize) {
     let mut files = Vec::new();
     collect_files(&root, exts, &mut files);
     files.sort();
+    files.retain(|p| {
+        let rel = p.strip_prefix(&root).ok().and_then(|r| r.to_str());
+        !rel.is_some_and(|r| exclude.contains(&r))
+    });
     assert!(
         !files.is_empty(),
         "no source files found under {}",
@@ -115,7 +121,13 @@ fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize) {
 
 #[test]
 fn chibi_scheme_corpus_parses() {
-    check_corpus("chibi-scheme", &["scm", "sld"], &Options::scheme(), 500);
+    check_corpus(
+        "chibi-scheme",
+        &["scm", "sld"],
+        &Options::scheme(),
+        500,
+        &[],
+    );
 }
 
 #[test]
@@ -125,5 +137,24 @@ fn clojure_corpus_parses() {
         &["clj", "cljc", "cljs"],
         &Options::clojure(),
         100,
+        &[],
+    );
+}
+
+#[test]
+fn cl_ppcre_corpus_parses() {
+    check_corpus("cl-ppcre", &["lisp"], &Options::common_lisp(), 15, &[]);
+}
+
+#[test]
+fn lem_corpus_parses() {
+    check_corpus(
+        "lem",
+        &["lisp"],
+        &Options::common_lisp(),
+        500,
+        // Uses a runtime-defined `#?'...'` dispatch macro (vi-mode test DSL),
+        // which a static reader cannot parse.
+        &["extensions/vi-mode/tests/visual.lisp"],
     );
 }

@@ -2,7 +2,7 @@
 //!
 //! Robust to incomplete input at character granularity; it never does the
 //! top-level resync that is a Reader policy (ADR-0015). Driven entirely by
-//! [`Options`] (ADR-0003); covers the Scheme and Clojure lexical surfaces.
+//! [`Options`] (ADR-0003); covers the Scheme, Clojure, and Common Lisp surfaces.
 
 use crate::datum::{Delim, Prefix};
 use crate::options::{CharSyntax, HashParen, Options};
@@ -137,9 +137,32 @@ impl<'a> Lexer<'a> {
         }
 
         // Otherwise, an atom (symbol, number, or keyword).
-        self.bump();
-        self.consume_atom_body();
-        Some(self.token(TokenKind::Atom, start))
+        Some(self.lex_atom(start))
+    }
+
+    /// Lex an atom, honoring `\`-escapes inside symbols where the dialect allows
+    /// them (Common Lisp). Always consumes at least the current character.
+    fn lex_atom(&mut self, start: usize) -> Token {
+        // First character (may be an escape).
+        if self.opts.symbol_escape && self.peek() == Some('\\') {
+            self.bump();
+            self.bump();
+        } else {
+            self.bump();
+        }
+        loop {
+            match self.peek() {
+                Some('\\') if self.opts.symbol_escape => {
+                    self.bump();
+                    self.bump();
+                }
+                Some(c) if !self.is_terminator(c) => {
+                    self.bump();
+                }
+                _ => break,
+            }
+        }
+        self.token(TokenKind::Atom, start)
     }
 
     fn try_prefix(&mut self) -> Option<TokenKind> {
@@ -227,9 +250,21 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::Prefix(Prefix::Discard), start)
             }
-            Some('\'') if self.opts.var_quote => {
+            Some('\'') if self.opts.hash_apostrophe.is_some() => {
                 self.bump();
-                self.token(TokenKind::Prefix(Prefix::VarQuote), start)
+                let prefix = self.opts.hash_apostrophe.unwrap();
+                self.token(TokenKind::Prefix(prefix), start)
+            }
+            Some('.') if self.opts.read_eval => {
+                self.bump();
+                self.token(TokenKind::Prefix(Prefix::ReadEval), start)
+            }
+            Some(c) if self.opts.feature_conditional && (c == '+' || c == '-') => {
+                self.bump();
+                self.token(
+                    TokenKind::Prefix(Prefix::ReaderConditional(c == '+')),
+                    start,
+                )
             }
             Some('^') if self.opts.meta.is_some() => {
                 self.bump();

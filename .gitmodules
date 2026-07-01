@@ -4,3 +4,9 @@
 [submodule "tests/corpus/clojure"]
 	path = tests/corpus/clojure
 	url = https://github.com/clojure/clojure
+[submodule "tests/corpus/cl-ppcre"]
+	path = tests/corpus/cl-ppcre
+	url = https://github.com/edicl/cl-ppcre
+[submodule "tests/corpus/lem"]
+	path = tests/corpus/lem
+	url = https://github.com/lem-project/lem
