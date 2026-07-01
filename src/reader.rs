@@ -22,7 +22,10 @@ pub struct Parsed<'a> {
     pub errors: Vec<ParseError>,
 }
 
-/// Parse `source` under `options` into a datum tree. Never panics.
+/// Parse `source` under `options` into a datum tree. Never panics — including
+/// on pathologically nested input: list/hash nesting deeper than
+/// [`MAX_DEPTH`] stops descending, reports [`ErrorKind::DepthLimitExceeded`]
+/// once, and skips the too-deep subtree (ADR-0004), keeping prior siblings.
 pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
     let mut lang_line: Option<&'a str> = None;
     let tokens = significant_tokens(source, options, Some(&mut lang_line));
@@ -124,12 +127,24 @@ fn significant_tokens<'a>(
         .collect()
 }
 
+/// Maximum list/hash nesting depth the recursive-descent reader will build
+/// before it stops descending and recovers (ADR-0004). Each level is one
+/// `finish_list`/`parse_datum` stack frame, and those frames are large (a
+/// `Datum` and several locals) in unoptimized builds; empirically a 2 MB test
+/// thread overflows near ~450 such frames. This cap keeps a wide margin so the
+/// reader never panics at any input depth. Deeper input is reported as
+/// [`ErrorKind::DepthLimitExceeded`] once and its too-deep subtree is skipped
+/// (see [`parse`]).
+const MAX_DEPTH: usize = 200;
+
 struct Parser<'a, 'o> {
     source: &'a str,
     tokens: Vec<Token>,
     pos: usize,
     line_starts: Vec<u32>,
     errors: Vec<ParseError>,
+    /// Current list/hash nesting depth, capped at [`MAX_DEPTH`].
+    depth: usize,
     /// Borrowed only for the duration of parsing (a separate lifetime from the
     /// source `'a`, so a caller's temporary `&Options` stays ergonomic).
     opts: &'o Options,
@@ -144,6 +159,7 @@ impl<'a, 'o> Parser<'a, 'o> {
             line_starts: line_starts(source),
             errors: Vec::new(),
             opts: options,
+            depth: 0,
         }
     }
 
@@ -182,10 +198,23 @@ impl<'a, 'o> Parser<'a, 'o> {
                     self.error(t.span, ErrorKind::UnexpectedDelimiter { found });
                 }
                 _ => {
+                    let before = self.pos;
                     if let Some(d) = self.parse_datum() {
                         data.push(d);
+                    } else if self.pos < self.tokens.len() {
+                        // `parse_datum` returned None but tokens remain — a
+                        // dangling prefix/discard consumed its operand then
+                        // yielded nothing (`#;) (a b)`, `') x`). Do NOT treat
+                        // this as EOF and lose the rest of the file (R1); loop
+                        // again so the next form (or the Close arm) is reached.
+                        // Guarantee progress: if nothing was consumed and the
+                        // next token is not a Close (handled above), skip one
+                        // token to avoid an infinite loop.
+                        if self.pos == before {
+                            self.advance();
+                        }
                     } else {
-                        break;
+                        break; // genuine EOF
                     }
                 }
             }
@@ -202,8 +231,17 @@ impl<'a, 'o> Parser<'a, 'o> {
                 TokenKind::Close(_) => return None,
                 TokenKind::Prefix(Prefix::Discard) => {
                     self.advance();
-                    // Drop the next datum entirely.
-                    let _ = self.parse_datum();
+                    // Drop the next datum entirely. If none follows (`#;` at EOF
+                    // or before a stray close), report it like any other dangling
+                    // prefix instead of silently swallowing it (R1b).
+                    if self.parse_datum().is_none() {
+                        self.error(
+                            t.span,
+                            ErrorKind::DanglingPrefix {
+                                prefix: Prefix::Discard,
+                            },
+                        );
+                    }
                     continue;
                 }
                 TokenKind::Error => {
@@ -364,6 +402,29 @@ impl<'a, 'o> Parser<'a, 'o> {
     /// not a folded quote).
     fn finish_list(&mut self, delim: Delim, open: Span, fold: bool) -> Datum<'a> {
         let line = self.line_of(open.start);
+
+        // Depth cap (ADR-0004 fault tolerance): recursive descent would blow the
+        // stack on pathologically nested input. Beyond `MAX_DEPTH` we stop
+        // descending, report the limit once, and skip the balanced region so the
+        // reader never panics at any depth and prior siblings survive.
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            if self.depth == MAX_DEPTH + 1 {
+                self.error(open, ErrorKind::DepthLimitExceeded);
+            }
+            let end = self.skip_balanced(delim);
+            self.depth -= 1;
+            return Datum {
+                kind: DatumKind::List {
+                    delim,
+                    items: Vec::new(),
+                    tail: None,
+                },
+                span: Span::new(open.start, end),
+                line,
+            };
+        }
+
         let mut items: Vec<Datum<'a>> = Vec::new();
         let mut tail: Option<Box<Datum<'a>>> = None;
         let end;
@@ -391,12 +452,21 @@ impl<'a, 'o> Parser<'a, 'o> {
                     break;
                 }
                 TokenKind::Atom
-                    if self.opts.dotted_pairs
-                        && tail.is_none()
-                        && !items.is_empty()
-                        && self.text(t.span) == "." =>
+                    if self.opts.dotted_pairs && !items.is_empty() && self.text(t.span) == "." =>
                 {
                     self.advance(); // consume the dot
+                    if let Some(prev_tail) = tail.take() {
+                        // A second dot after a tail. In Racket this is the *infix*
+                        // dot convention (`(dom . -> . rng)` reads as
+                        // `(-> dom rng)`); elsewhere it is malformed (R4). Either
+                        // way fold the prior tail back into the items so the tree
+                        // keeps every datum in order, then let the new datum
+                        // become the tail.
+                        if !self.opts.dotted_pairs_infix {
+                            self.error(t.span, ErrorKind::ItemAfterDottedTail);
+                        }
+                        items.push(*prev_tail);
+                    }
                     match self.parse_datum() {
                         Some(d) => tail = Some(Box::new(d)),
                         None => self.error(t.span, ErrorKind::DanglingDot),
@@ -404,12 +474,28 @@ impl<'a, 'o> Parser<'a, 'o> {
                     // The loop continues; the next token should be the close.
                 }
                 _ => match self.parse_datum() {
-                    Some(d) => items.push(d),
+                    Some(d) => {
+                        // A plain item after a dotted tail (`(a . b c)`): fold the
+                        // prior tail back into the items so no datum is lost and
+                        // then treat this datum as a normal item. In dialects
+                        // *without* the infix-dot convention this is the only way
+                        // items can follow a tail and it is malformed (flagged
+                        // once, R4); in infix-dot dialects (Scheme/Racket) it is
+                        // usually a further datum in an infix chain
+                        // (`(A B . -> . C : prop)`), so it is not flagged.
+                        if let Some(prev_tail) = tail.take() {
+                            if !self.opts.dotted_pairs_infix {
+                                self.error(d.span, ErrorKind::ItemAfterDottedTail);
+                            }
+                            items.push(*prev_tail);
+                        }
+                        items.push(d);
+                    }
                     None => {
                         // A stray close was seen; loop will consume it.
                         if !matches!(self.peek().map(|t| t.kind), Some(TokenKind::Close(_))) {
                             self.error(open, ErrorKind::UnclosedList { open: delim });
-                            end = open.end;
+                            end = items.last().map(|d| d.span.end).unwrap_or(open.end);
                             break;
                         }
                     }
@@ -417,6 +503,7 @@ impl<'a, 'o> Parser<'a, 'o> {
             }
         }
 
+        self.depth -= 1;
         let datum = Datum {
             kind: DatumKind::List { delim, items, tail },
             span: Span::new(open.start, end),
@@ -427,6 +514,39 @@ impl<'a, 'o> Parser<'a, 'o> {
         } else {
             datum
         }
+    }
+
+    /// Skip a balanced delimiter region without building a tree, tracking nested
+    /// opens so the matching close is the one that ends *this* region. Used by
+    /// the depth-cap recovery: the offending subtree's tokens are consumed
+    /// conservatively instead of descended into. Returns the end offset (past
+    /// the matching close, or the last token consumed at EOF).
+    fn skip_balanced(&mut self, delim: Delim) -> u32 {
+        let mut nesting = 1usize;
+        let mut end = self.tokens.get(self.pos).map(|t| t.span.start).unwrap_or(0);
+        while let Some(t) = self.advance() {
+            end = t.span.end;
+            match t.kind {
+                TokenKind::Open(_) | TokenKind::HashOpen(_) => nesting += 1,
+                TokenKind::Close(close_delim) => {
+                    nesting -= 1;
+                    if nesting == 0 {
+                        if !close_matches(delim, close_delim) {
+                            self.error(
+                                t.span,
+                                ErrorKind::MismatchedDelimiter {
+                                    expected: delim,
+                                    found: close_delim,
+                                },
+                            );
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        end
     }
 
     /// Read a `#(`-style hash literal: items until the matching close, wrapped

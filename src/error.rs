@@ -56,6 +56,14 @@ pub enum ErrorKind {
     DanglingLabel,
     /// A `.` inside a list with no tail datum after it.
     DanglingDot,
+    /// One or more items appeared after a dotted tail (`(a . b c)`), or a second
+    /// dot (`(a . b . c)`). The reader keeps accumulating the stray items into
+    /// the list so nothing is lost, but reports this once per offending item so
+    /// round-trip consumers know the order was disturbed.
+    ItemAfterDottedTail,
+    /// Nesting exceeded the reader's depth cap (ADR-0004). The too-deep subtree
+    /// is skipped so the reader never overflows the stack; reported once.
+    DepthLimitExceeded,
 }
 
 impl fmt::Display for ErrorKind {
@@ -80,6 +88,12 @@ impl fmt::Display for ErrorKind {
             ErrorKind::DanglingTag => write!(f, "tagged literal with no following datum"),
             ErrorKind::DanglingLabel => write!(f, "datum label with no following datum"),
             ErrorKind::DanglingDot => write!(f, "dotted list with no tail datum"),
+            ErrorKind::ItemAfterDottedTail => {
+                write!(f, "item after dotted tail")
+            }
+            ErrorKind::DepthLimitExceeded => {
+                write!(f, "nesting too deep; stopped descending")
+            }
         }
     }
 }

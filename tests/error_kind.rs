@@ -115,3 +115,57 @@ fn parse_form_at_past_end_is_none() {
     let src = "(a b)   ";
     assert!(parse_form_at(src, 5, &Options::scheme()).is_none());
 }
+
+#[test]
+fn item_after_dotted_tail_is_reported() {
+    // `(a . b c)`: a bare item after the dotted tail is malformed in Scheme;
+    // every datum is kept but the disturbance is flagged (R4).
+    let parsed = parse("(a . b c)", &Options::scheme());
+    assert!(
+        parsed
+            .errors
+            .iter()
+            .any(|e| matches!(e.kind, ErrorKind::ItemAfterDottedTail)),
+        "expected ItemAfterDottedTail, got {:?}",
+        parsed.errors
+    );
+}
+
+#[test]
+fn second_dot_is_reported_in_scheme() {
+    // `(a . b . c)` — a second dot is malformed in plain Scheme (no infix dot).
+    let parsed = parse("(a . b . c)", &Options::scheme());
+    assert!(
+        parsed
+            .errors
+            .iter()
+            .any(|e| matches!(e.kind, ErrorKind::ItemAfterDottedTail)),
+        "expected ItemAfterDottedTail for a second dot, got {:?}",
+        parsed.errors
+    );
+}
+
+#[test]
+fn racket_infix_dot_is_not_an_error() {
+    // Racket's `(dom . -> . rng)` infix dot is legitimate, not flagged (R4).
+    let parsed = parse("(dom . -> . rng)", &Options::racket());
+    assert!(
+        parsed.errors.is_empty(),
+        "Racket infix dot must parse cleanly: {:?}",
+        parsed.errors
+    );
+}
+
+#[test]
+fn depth_limit_exceeded_kind() {
+    let src = "(".repeat(2000);
+    let parsed = parse(&src, &Options::scheme());
+    assert!(
+        parsed
+            .errors
+            .iter()
+            .any(|e| matches!(e.kind, ErrorKind::DepthLimitExceeded)),
+        "expected DepthLimitExceeded, got {:?}",
+        parsed.errors
+    );
+}

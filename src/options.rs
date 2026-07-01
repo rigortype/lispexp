@@ -241,6 +241,14 @@ pub struct Options {
     /// `#{foo bar}#` is one verbatim [`Symbol`](crate::DatumKind::Symbol) token.
     /// Mutually exclusive with [`Self::set_literal`] (both claim `#{`).
     pub hash_curly_symbol: bool,
+    /// Whether the dialect accepts Racket's *infix dot* convention, where a
+    /// second dot in a list (`(dom . -> . rng)`, read as `(-> dom rng)`) is
+    /// legitimate rather than malformed. When `false` (Scheme, Common Lisp,
+    /// Emacs Lisp, …), an item or dot after the dotted tail is reported as
+    /// [`ErrorKind::ItemAfterDottedTail`](crate::ErrorKind::ItemAfterDottedTail)
+    /// (R4); the reader keeps every datum either way. Only meaningful when
+    /// [`Self::dotted_pairs`] is set.
+    pub dotted_pairs_infix: bool,
 }
 
 impl Options {
@@ -296,6 +304,7 @@ impl Options {
             fold_longhand: true,
             fold_case_insensitive: false,
             hash_curly_symbol: false,
+            dotted_pairs_infix: false,
         }
     }
 
@@ -347,6 +356,7 @@ impl Options {
             fold_longhand: false,
             fold_case_insensitive: false,
             hash_curly_symbol: false,
+            dotted_pairs_infix: false,
         }
     }
 
@@ -402,6 +412,7 @@ impl Options {
             // Common Lisp's reader is case-insensitive: `(QUOTE X)` is quote.
             fold_case_insensitive: true,
             hash_curly_symbol: false,
+            dotted_pairs_infix: false,
         }
     }
 
@@ -452,6 +463,7 @@ impl Options {
             fold_longhand: true,
             fold_case_insensitive: false,
             hash_curly_symbol: false,
+            dotted_pairs_infix: false,
         }
     }
 
@@ -467,6 +479,7 @@ impl Options {
             hash_keyword: true,
             lang_line: true,
             shebang_line: true,
+            dotted_pairs_infix: true, // Racket's `(dom . -> . rng)` infix dot
             ..Options::scheme()
         }
     }
@@ -664,6 +677,7 @@ impl Options {
             bytevector_vu8: true,               // Mosh/R6RS  #vu8(...)
             keyword_colon: true,                // Gauche/Guile  :foo
             keyword_trailing_colon: true,       // Gambit/Gerbil  foo:
+            dotted_pairs_infix: true,           // tolerate Gauche/Gambit infix-ish dot chains
             ..Options::scheme()
         }
     }

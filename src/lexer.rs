@@ -342,12 +342,22 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_string(&mut self, start: usize) -> Token {
+        let content_start = start + 1;
         self.bump(); // opening quote
         if self.consume_until_unescaped('"') {
-            self.token(TokenKind::Str, start)
-        } else {
-            self.token(TokenKind::Error, start) // unterminated
+            return self.token(TokenKind::Str, start);
         }
+        // Unterminated: the scan ran to EOF as one Error token, which would
+        // swallow the rest of the file so the reader can never resync (R5).
+        // Backtrack to just before the first line-start `(` after the opening
+        // quote — overwhelmingly the next top-level form, not string content.
+        // A legitimately terminated string (even a multiline one holding a
+        // line-start `(`) never reaches here, so this only affects the error
+        // path.
+        if let Some(cut) = next_line_start_paren(&self.src[content_start..]) {
+            self.pos = content_start + cut;
+        }
+        self.token(TokenKind::Error, start)
     }
 
     /// Consume characters up to and including the next unescaped `close`, from
@@ -666,6 +676,31 @@ impl<'a> Iterator for Lexer<'a> {
     fn next(&mut self) -> Option<Token> {
         self.next_token()
     }
+}
+
+/// In `s` (the content just past an unterminated string's opening quote), find
+/// the byte offset of the first line-start `(` — the `(` that is the first
+/// non-whitespace character of a line after a `\n`. Returns `None` if no such
+/// line exists (then the unterminated string keeps its to-EOF span). Used only
+/// on the error path to let the reader resync at the likely next top-level form
+/// (R5).
+fn next_line_start_paren(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\n' {
+            // Skip leading whitespace on the next line.
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j] != b'\n' && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'(' {
+                return Some(j);
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 fn is_radix(c: char) -> bool {
