@@ -16,11 +16,13 @@ use crate::span::Span;
 #[non_exhaustive]
 pub enum ErrorKind {
     /// A closing delimiter with no matching open (e.g. `)` at top level).
+    #[non_exhaustive]
     UnexpectedDelimiter {
         /// The delimiter shape that was found.
         found: Delim,
     },
     /// A closing delimiter that does not match the list it closes.
+    #[non_exhaustive]
     MismatchedDelimiter {
         /// The delimiter the open list expected.
         expected: Delim,
@@ -28,14 +30,22 @@ pub enum ErrorKind {
         found: Delim,
     },
     /// A list opened but never closed before end of input.
+    #[non_exhaustive]
     UnclosedList {
         /// The shape of the unclosed opening delimiter.
         open: Delim,
     },
-    /// A token the lexer could not form.
-    MalformedToken,
+    /// A token the lexer could not form. Carries the offending text (owned,
+    /// non-positional — two different malformed tokens stay distinguishable
+    /// in an error-set diff).
+    #[non_exhaustive]
+    MalformedToken {
+        /// The token's verbatim text.
+        text: Box<str>,
+    },
     /// A reader-macro prefix (`'`, `` ` ``, `,`, `^`, `#+`, …) with no datum
     /// following it.
+    #[non_exhaustive]
     DanglingPrefix {
         /// The prefix left dangling.
         prefix: Prefix,
@@ -63,9 +73,9 @@ impl fmt::Display for ErrorKind {
             ErrorKind::UnclosedList { open } => {
                 write!(f, "unclosed list opened with `{}`", open_glyph(*open))
             }
-            ErrorKind::MalformedToken => write!(f, "malformed token"),
-            ErrorKind::DanglingPrefix { .. } => {
-                write!(f, "reader-macro prefix with no following datum")
+            ErrorKind::MalformedToken { text } => write!(f, "malformed token `{text}`"),
+            ErrorKind::DanglingPrefix { prefix } => {
+                write!(f, "{prefix:?} prefix with no following datum")
             }
             ErrorKind::DanglingTag => write!(f, "tagged literal with no following datum"),
             ErrorKind::DanglingLabel => write!(f, "datum label with no following datum"),

@@ -30,6 +30,8 @@
 //! The visitor is primary because pruning cannot be expressed by a bare
 //! iterator. A pre-order iterator adapter may be layered on later.
 
+use std::ops::ControlFlow;
+
 use crate::datum::{Datum, DatumKind, Prefix};
 
 /// Whether a subtree is executable code or inert data (ADR-0026).
@@ -43,11 +45,14 @@ pub enum Class {
 
 /// What the visitor callback asks the walker to do next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Walk {
     /// Recurse into this datum's children.
     Descend,
     /// Do not recurse into this datum's children.
     Skip,
+    /// Abort the whole walk immediately (e.g. after a first match).
+    Stop,
 }
 
 /// The classification region a datum sits in: an absolute quote barrier and a
@@ -121,46 +126,52 @@ fn node_class(datum: &Datum<'_>, ctx: Ctx) -> Class {
 
 /// Walk each top-level datum in `data`, invoking `visit(datum, class)` in
 /// pre-order. When the callback returns [`Walk::Skip`], that datum's children
-/// are pruned; [`Walk::Descend`] recurses. Top-level data start as [`Class::Code`].
+/// are pruned; [`Walk::Descend`] recurses; [`Walk::Stop`] aborts the whole
+/// walk. Top-level data start as [`Class::Code`].
 pub fn walk<'a, 't, F>(data: &'a [Datum<'t>], mut visit: F)
 where
     F: FnMut(&'a Datum<'t>, Class) -> Walk,
 {
     for datum in data {
-        walk_datum(datum, Ctx::TOP, &mut visit);
+        if walk_datum(datum, Ctx::TOP, &mut visit).is_break() {
+            return;
+        }
     }
 }
 
-fn walk_datum<'a, 't, F>(datum: &'a Datum<'t>, ctx: Ctx, visit: &mut F)
+fn walk_datum<'a, 't, F>(datum: &'a Datum<'t>, ctx: Ctx, visit: &mut F) -> ControlFlow<()>
 where
     F: FnMut(&'a Datum<'t>, Class) -> Walk,
 {
-    if visit(datum, node_class(datum, ctx)) == Walk::Skip {
-        return;
+    match visit(datum, node_class(datum, ctx)) {
+        Walk::Skip => return ControlFlow::Continue(()),
+        Walk::Stop => return ControlFlow::Break(()),
+        Walk::Descend => {}
     }
     match &datum.kind {
         DatumKind::List { items, tail, .. } => {
             for item in items {
-                walk_datum(item, ctx, visit);
+                walk_datum(item, ctx, visit)?;
             }
             if let Some(tail) = tail {
-                walk_datum(tail, ctx, visit);
+                walk_datum(tail, ctx, visit)?;
             }
         }
         DatumKind::Prefixed { prefix, inner, .. } => {
-            walk_datum(inner, inner_ctx(*prefix, ctx), visit);
+            walk_datum(inner, inner_ctx(*prefix, ctx), visit)?;
         }
         // A hash literal's content is data; a datum label is transparent.
         DatumKind::HashLiteral {
             inner: Some(inner), ..
         } => {
-            walk_datum(inner, Ctx::DATA, visit);
+            walk_datum(inner, Ctx::DATA, visit)?;
         }
         DatumKind::Label { inner, .. } => {
-            walk_datum(inner, ctx, visit);
+            walk_datum(inner, ctx, visit)?;
         }
         _ => {}
     }
+    ControlFlow::Continue(())
 }
 
 #[cfg(test)]
@@ -268,6 +279,27 @@ mod tests {
         // #. runs at read time — quote cannot inert it.
         let c = Options::common_lisp();
         assert_eq!(class_of("'(a #.(f))", &c, "(f)"), Class::Code);
+    }
+
+    #[test]
+    fn stop_aborts_the_walk() {
+        let s = Options::scheme();
+        let src = "(a b) (c d)";
+        let parsed = parse(src, &s);
+        let mut visited = Vec::new();
+        walk(&parsed.data, |d, _| {
+            visited.push(d.span.text(src));
+            if d.span.text(src) == "b" {
+                Walk::Stop
+            } else {
+                Walk::Descend
+            }
+        });
+        assert!(visited.contains(&"b"));
+        // Nothing after the stop point is visited — not even siblings or the
+        // next top-level form.
+        assert!(!visited.contains(&"(c d)"));
+        assert!(!visited.contains(&"c"));
     }
 
     #[test]

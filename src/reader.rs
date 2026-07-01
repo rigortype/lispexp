@@ -43,15 +43,16 @@ pub fn read_all<'a>(source: &'a str, options: &Options) -> std::vec::IntoIter<Da
 /// One top-level form read at or after a byte offset (ADR-0023).
 ///
 /// The result of [`parse_form_at`]. Spans are absolute into the original
-/// `source`, and `end` is the byte offset just past the form — the offset a
-/// consumer passes back to read the following form.
+/// `source`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FormAt<'a> {
     /// The form that was read.
     pub form: Datum<'a>,
     /// Diagnostics produced while reading just this form.
     pub errors: Vec<ParseError>,
-    /// Byte offset just past the form.
+    /// Byte offset just past the form — the offset a consumer passes back to
+    /// read the following form. A convenience alias for `form.span.end`; it
+    /// never includes trailing trivia.
     pub end: u32,
 }
 
@@ -63,6 +64,14 @@ pub struct FormAt<'a> {
 /// the form(s) an edit falls in and compare their small [`ErrorKind`] sets
 /// locally — the "reject only newly-introduced errors" policy stays with the
 /// consumer.
+///
+/// **Precondition:** `start` must sit at or before a top-level form boundary
+/// (obtain boundaries from a prior [`parse`]'s spans, or feed [`FormAt::end`]
+/// back). An offset strictly inside a form reads the next *inner* datum as if
+/// it were top-level and may report spurious delimiter diagnostics.
+///
+/// A leading `#lang` line is skipped, not surfaced — use [`parse`] to capture
+/// it.
 pub fn parse_form_at<'a>(source: &'a str, start: u32, options: &Options) -> Option<FormAt<'a>> {
     let tokens = significant_tokens(source, options, None);
     let mut parser = Parser::new(source, tokens, options);
@@ -199,7 +208,12 @@ impl<'a, 'o> Parser<'a, 'o> {
                 }
                 TokenKind::Error => {
                     self.advance();
-                    self.error(t.span, ErrorKind::MalformedToken);
+                    self.error(
+                        t.span,
+                        ErrorKind::MalformedToken {
+                            text: self.text(t.span).into(),
+                        },
+                    );
                     continue;
                 }
                 _ => break,

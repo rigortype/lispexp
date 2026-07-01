@@ -1,4 +1,7 @@
 //! Tests for structured `ErrorKind` and positioned reparse (ADR-0023).
+//!
+//! `ErrorKind`'s payload variants are `#[non_exhaustive]`, so consumers (and
+//! these tests) pattern-match rather than construct.
 
 use lispexp::{parse, parse_form_at, DatumKind, Delim, ErrorKind, Options};
 
@@ -10,32 +13,47 @@ fn only_error(src: &str) -> ErrorKind {
 
 #[test]
 fn unclosed_list_kind() {
-    assert_eq!(
+    assert!(matches!(
         only_error("(a b"),
-        ErrorKind::UnclosedList { open: Delim::Round }
-    );
+        ErrorKind::UnclosedList {
+            open: Delim::Round,
+            ..
+        }
+    ));
 }
 
 #[test]
 fn unexpected_delimiter_kind() {
-    assert_eq!(
+    assert!(matches!(
         only_error(")"),
         ErrorKind::UnexpectedDelimiter {
-            found: Delim::Round
+            found: Delim::Round,
+            ..
         }
-    );
+    ));
 }
 
 #[test]
 fn mismatched_delimiter_carries_expected_and_found() {
     // `[` opened, `)` closed — non-positional payload records both.
-    assert_eq!(
+    assert!(matches!(
         only_error("[a)"),
         ErrorKind::MismatchedDelimiter {
             expected: Delim::Square,
             found: Delim::Round,
+            ..
         }
-    );
+    ));
+}
+
+#[test]
+fn malformed_token_carries_text() {
+    // An unterminated string is a malformed token whose text is retained —
+    // non-positional, so two different defects stay distinguishable.
+    let parsed = parse("\"oops", &Options::scheme());
+    assert!(parsed.errors.iter().any(
+        |e| matches!(&e.kind, ErrorKind::MalformedToken { text, .. } if text.contains("oops"))
+    ));
 }
 
 #[test]
@@ -52,7 +70,7 @@ fn kind_is_shift_stable_and_hashable() {
 
 #[test]
 fn display_renders_human_message() {
-    let msg = format!("{}", ErrorKind::UnclosedList { open: Delim::Round });
+    let msg = format!("{}", only_error("(a b"));
     assert!(msg.contains("unclosed"), "{msg}");
 }
 
@@ -82,10 +100,14 @@ fn parse_form_at_reports_local_errors() {
     let src = "(a b) (c";
     let f = parse_form_at(src, 6, &Options::scheme()).unwrap();
     assert!(matches!(f.form.kind, DatumKind::List { .. }));
-    assert_eq!(
-        f.errors.iter().map(|e| &e.kind).collect::<Vec<_>>(),
-        vec![&ErrorKind::UnclosedList { open: Delim::Round }]
-    );
+    assert_eq!(f.errors.len(), 1);
+    assert!(matches!(
+        f.errors[0].kind,
+        ErrorKind::UnclosedList {
+            open: Delim::Round,
+            ..
+        }
+    ));
 }
 
 #[test]
