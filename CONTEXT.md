@@ -49,6 +49,15 @@ _Avoid_: reader tag (reserve for the tag string itself)
 **Datum label**:
 A `#n=<datum>` definition and its `#n#` reference (Scheme/Common Lisp/Racket), marking shared or cyclic structure. sexpp records them structurally but does not resolve the graph, consistent with being reader-only.
 
+**Form spec**:
+A description of a definition form's argument structure — which position is the defined name, the arglist, the docstring, the body — derived from a macro's declared Edebug `debug` spec (leading with `&define`) plus `doc-string`/`indent` declarations. Collected into a form-spec registry (ADR-0019).
+
+**Spec harvester**:
+The component that scans Emacs Lisp source, reads each definition macro's `declare` metadata, and derives Form specs into a registry. Emacs's own definition macros are harvested and bundled as builtins. (Tentatively called "macro-collector".)
+
+**Form annotator**:
+The component that walks a Datum tree and, for each list whose head matches a Form spec, tags the children with their roles (name, arglist, docstring, body). A best-effort utility layer over the tree — it reads declared metadata, never expands macros (ADR-0019, consistent with [[reader-only-scope]]). (Tentatively called "macro-annotator".)
+
 **Fault-tolerant parsing**:
 sexpp's error-recovery model: a syntax error causes the Reader to skip to the start of the next top-level form and resume there, so a single malformed form loses only itself — never the rest of the file. Recovery resynchronizes at top-level granularity only, not within a list.
 
