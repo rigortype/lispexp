@@ -27,16 +27,21 @@
 pub mod annotate;
 mod datum;
 mod error;
+pub mod indent;
 mod lexer;
+mod line_index;
 mod options;
 mod reader;
 mod span;
 mod token;
+mod walk;
 
 pub use datum::{Datum, DatumKind, Delim, Notation, Prefix};
-pub use error::ParseError;
+pub use error::{ErrorKind, ParseError};
 pub use lexer::{lex, Lexer};
+pub use line_index::LineIndex;
 pub use options::{BlockComment, CharSyntax, DelimRole, Dialect, HashBracket, HashParen, Options};
-pub use reader::{parse, read_all, Parsed};
+pub use reader::{parse, parse_form_at, read_all, FormAt, Parsed};
 pub use span::Span;
 pub use token::{Token, TokenKind};
+pub use walk::{walk, Class, Walk};

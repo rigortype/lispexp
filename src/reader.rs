@@ -4,7 +4,7 @@
 //! panics and never loses the rest of the file.
 
 use crate::datum::{Datum, DatumKind, Delim, Notation, Prefix};
-use crate::error::ParseError;
+use crate::error::{ErrorKind, ParseError};
 use crate::lexer::Lexer;
 use crate::options::Options;
 use crate::span::Span;
@@ -25,31 +25,8 @@ pub struct Parsed<'a> {
 /// Parse `source` under `options` into a datum tree. Never panics.
 pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
     let mut lang_line: Option<&'a str> = None;
-    let tokens: Vec<Token> = Lexer::new(source, options)
-        .filter(|t| {
-            if t.kind == TokenKind::LangLine && lang_line.is_none() {
-                // Capture the language spec after `#lang`, verbatim (ADR-0012).
-                lang_line = Some(t.span.text(source).trim_start_matches("#lang").trim());
-            }
-            !matches!(
-                t.kind,
-                TokenKind::Whitespace
-                    | TokenKind::LineComment
-                    | TokenKind::BlockComment
-                    | TokenKind::LangLine
-            )
-        })
-        .collect();
-
-    let mut parser = Parser {
-        source,
-        tokens,
-        pos: 0,
-        line_starts: line_starts(source),
-        errors: Vec::new(),
-        opts: options,
-    };
-
+    let tokens = significant_tokens(source, options, Some(&mut lang_line));
+    let mut parser = Parser::new(source, tokens, options);
     let data = parser.parse_top_level();
     Parsed {
         lang_line,
@@ -63,6 +40,90 @@ pub fn read_all<'a>(source: &'a str, options: &Options) -> std::vec::IntoIter<Da
     parse(source, options).data.into_iter()
 }
 
+/// One top-level form read at or after a byte offset (ADR-0023).
+///
+/// The result of [`parse_form_at`]. Spans are absolute into the original
+/// `source`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FormAt<'a> {
+    /// The form that was read.
+    pub form: Datum<'a>,
+    /// Diagnostics produced while reading just this form.
+    pub errors: Vec<ParseError>,
+    /// Byte offset just past the form — the offset a consumer passes back to
+    /// read the following form. A convenience alias for `form.span.end`; it
+    /// never includes trailing trivia.
+    pub end: u32,
+}
+
+/// Read exactly one top-level form at or after byte offset `start` (ADR-0023).
+///
+/// Returns `None` if there is no further form (only whitespace/comments, or
+/// `start` is past end of input). Spans are absolute into `source`. Because
+/// recovery is top-level-granular (ADR-0004), a consumer can re-validate just
+/// the form(s) an edit falls in and compare their small [`ErrorKind`] sets
+/// locally — the "reject only newly-introduced errors" policy stays with the
+/// consumer.
+///
+/// **Precondition:** `start` must sit at or before a top-level form boundary
+/// (obtain boundaries from a prior [`parse`]'s spans, or feed [`FormAt::end`]
+/// back). An offset strictly inside a form reads the next *inner* datum as if
+/// it were top-level and may report spurious delimiter diagnostics.
+///
+/// A leading `#lang` line is skipped, not surfaced — use [`parse`] to capture
+/// it.
+pub fn parse_form_at<'a>(source: &'a str, start: u32, options: &Options) -> Option<FormAt<'a>> {
+    let tokens = significant_tokens(source, options, None);
+    let mut parser = Parser::new(source, tokens, options);
+    // Skip to the first significant token at or after `start`.
+    parser.pos = parser.tokens.partition_point(|t| t.span.start < start);
+
+    // Consume any stray closing delimiters, then read one form.
+    let form = loop {
+        let t = parser.peek()?;
+        if let TokenKind::Close(found) = t.kind {
+            parser.advance();
+            parser.error(t.span, ErrorKind::UnexpectedDelimiter { found });
+            continue;
+        }
+        break parser.parse_datum()?;
+    };
+    let end = form.span.end;
+    Some(FormAt {
+        form,
+        errors: parser.errors,
+        end,
+    })
+}
+
+/// Lex `source` and drop insignificant tokens (whitespace, comments, lang
+/// line). If `capture_lang` is `Some`, the first `#lang` spec is captured into
+/// it, verbatim (ADR-0012).
+fn significant_tokens<'a>(
+    source: &'a str,
+    options: &Options,
+    mut capture_lang: Option<&mut Option<&'a str>>,
+) -> Vec<Token> {
+    Lexer::new(source, options)
+        .filter(|t| {
+            if t.kind == TokenKind::LangLine {
+                if let Some(slot) = capture_lang.as_deref_mut() {
+                    if slot.is_none() {
+                        *slot = Some(t.span.text(source).trim_start_matches("#lang").trim());
+                    }
+                }
+            }
+            !matches!(
+                t.kind,
+                TokenKind::Whitespace
+                    | TokenKind::LineComment
+                    | TokenKind::BlockComment
+                    | TokenKind::LangLine
+            )
+        })
+        .collect()
+}
+
 struct Parser<'a, 'o> {
     source: &'a str,
     tokens: Vec<Token>,
@@ -74,7 +135,18 @@ struct Parser<'a, 'o> {
     opts: &'o Options,
 }
 
-impl<'a> Parser<'a, '_> {
+impl<'a, 'o> Parser<'a, 'o> {
+    fn new(source: &'a str, tokens: Vec<Token>, options: &'o Options) -> Self {
+        Parser {
+            source,
+            tokens,
+            pos: 0,
+            line_starts: line_starts(source),
+            errors: Vec::new(),
+            opts: options,
+        }
+    }
+
     fn peek(&self) -> Option<Token> {
         self.tokens.get(self.pos).copied()
     }
@@ -96,22 +168,18 @@ impl<'a> Parser<'a, '_> {
         self.line_starts.partition_point(|&s| s <= offset) as u32
     }
 
-    fn error(&mut self, span: Span, message: impl Into<String>) {
+    fn error(&mut self, span: Span, kind: ErrorKind) {
         let line = self.line_of(span.start);
-        self.errors.push(ParseError {
-            span,
-            line,
-            message: message.into(),
-        });
+        self.errors.push(ParseError { span, line, kind });
     }
 
     fn parse_top_level(&mut self) -> Vec<Datum<'a>> {
         let mut data = Vec::new();
         while let Some(t) = self.peek() {
             match t.kind {
-                TokenKind::Close(_) => {
+                TokenKind::Close(found) => {
                     self.advance();
-                    self.error(t.span, "unexpected closing delimiter");
+                    self.error(t.span, ErrorKind::UnexpectedDelimiter { found });
                 }
                 _ => {
                     if let Some(d) = self.parse_datum() {
@@ -140,7 +208,12 @@ impl<'a> Parser<'a, '_> {
                 }
                 TokenKind::Error => {
                     self.advance();
-                    self.error(t.span, "malformed token");
+                    self.error(
+                        t.span,
+                        ErrorKind::MalformedToken {
+                            text: self.text(t.span).into(),
+                        },
+                    );
                     continue;
                 }
                 _ => break,
@@ -162,7 +235,7 @@ impl<'a> Parser<'a, '_> {
                 let inner = match self.parse_datum() {
                     Some(d) => Some(Box::new(d)),
                     None => {
-                        self.error(t.span, "tagged literal with no following datum");
+                        self.error(t.span, ErrorKind::DanglingTag);
                         None
                     }
                 };
@@ -184,7 +257,12 @@ impl<'a> Parser<'a, '_> {
                 let inner = match self.parse_datum() {
                     Some(d) => d,
                     None => {
-                        self.error(t.span, "reader conditional with no guarded form");
+                        self.error(
+                            t.span,
+                            ErrorKind::DanglingPrefix {
+                                prefix: Prefix::ReaderConditional(sense),
+                            },
+                        );
                         return None;
                     }
                 };
@@ -208,7 +286,12 @@ impl<'a> Parser<'a, '_> {
                 let inner = match self.parse_datum() {
                     Some(d) => d,
                     None => {
-                        self.error(t.span, "metadata with no target datum");
+                        self.error(
+                            t.span,
+                            ErrorKind::DanglingPrefix {
+                                prefix: Prefix::Meta,
+                            },
+                        );
                         return None;
                     }
                 };
@@ -227,7 +310,7 @@ impl<'a> Parser<'a, '_> {
                 let inner = match self.parse_datum() {
                     Some(d) => d,
                     None => {
-                        self.error(t.span, "prefix with no following datum");
+                        self.error(t.span, ErrorKind::DanglingPrefix { prefix });
                         return None;
                     }
                 };
@@ -247,7 +330,7 @@ impl<'a> Parser<'a, '_> {
                 let inner = match self.parse_datum() {
                     Some(d) => d,
                     None => {
-                        self.error(t.span, "datum label with no following datum");
+                        self.error(t.span, ErrorKind::DanglingLabel);
                         return None;
                     }
                 };
@@ -289,7 +372,7 @@ impl<'a> Parser<'a, '_> {
 
         loop {
             let Some(t) = self.peek() else {
-                self.error(open, "unclosed list");
+                self.error(open, ErrorKind::UnclosedList { open: delim });
                 end = items.last().map(|d| d.span.end).unwrap_or(open.end);
                 break;
             };
@@ -298,7 +381,13 @@ impl<'a> Parser<'a, '_> {
                 TokenKind::Close(close_delim) => {
                     self.advance();
                     if !close_matches(delim, close_delim) {
-                        self.error(t.span, "mismatched closing delimiter");
+                        self.error(
+                            t.span,
+                            ErrorKind::MismatchedDelimiter {
+                                expected: delim,
+                                found: close_delim,
+                            },
+                        );
                     }
                     end = t.span.end;
                     break;
@@ -312,7 +401,7 @@ impl<'a> Parser<'a, '_> {
                     self.advance(); // consume the dot
                     match self.parse_datum() {
                         Some(d) => tail = Some(Box::new(d)),
-                        None => self.error(t.span, "dotted list with no tail datum"),
+                        None => self.error(t.span, ErrorKind::DanglingDot),
                     }
                     // The loop continues; the next token should be the close.
                 }
@@ -321,7 +410,7 @@ impl<'a> Parser<'a, '_> {
                     None => {
                         // A stray close was seen; loop will consume it.
                         if !matches!(self.peek().map(|t| t.kind), Some(TokenKind::Close(_))) {
-                            self.error(open, "unclosed list");
+                            self.error(open, ErrorKind::UnclosedList { open: delim });
                             end = open.end;
                             break;
                         }

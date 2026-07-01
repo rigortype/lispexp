@@ -85,7 +85,7 @@ fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize, exc
             failures.push((
                 path.clone(),
                 parsed.errors.len(),
-                format!("L{} {}: {}", first.line, first.message, snippet),
+                format!("L{} {}: {}", first.line, first.kind, snippet),
             ));
         }
     }

@@ -87,7 +87,11 @@ pub enum Delim {
 
 /// The role of a reader-macro prefix. The glyph that triggers each is a
 /// per-dialect table (ADR-0016).
+///
+/// `#[non_exhaustive]`: new dialects bring new prefixes without a breaking
+/// change; match with a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Prefix {
     /// `'x` / `(quote x)`.
     Quote,
