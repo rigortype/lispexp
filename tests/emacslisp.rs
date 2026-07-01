@@ -172,3 +172,11 @@ fn dotted_pair_and_radix() {
     assert_eq!(tail.as_ref().unwrap().kind, DatumKind::Symbol("b"));
     assert_eq!(data[1].kind, DatumKind::Number("#xFF"));
 }
+
+#[test]
+fn shorthands_are_read_verbatim() {
+    // A shorthand-style prefix is not expanded — the symbol is kept verbatim
+    // (ADR-0018); `read-symbol-shorthands` is not interpreted.
+    let data = el("snu-foo");
+    assert_eq!(data[0].kind, DatumKind::Symbol("snu-foo"));
+}
