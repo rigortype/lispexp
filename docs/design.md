@@ -218,11 +218,19 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
 ## Implementation status
 
 Implemented dialects: **Scheme** (`Options::scheme`), **Clojure** (`Options::clojure`),
-**Common Lisp** (`Options::common_lisp`), **Emacs Lisp** (`Options::emacs_lisp`), and
-**Racket** (`Options::racket`). Each is exercised by a real-world corpus under
-`tests/corpus/` — chibi-scheme (610 files), clojure/clojure (142), cl-ppcre (23), lem
-(627 CL files), magit (49 elisp files), and typed-racket (1872 files) — all parse with
-zero errors.
+**Common Lisp** (`Options::common_lisp`), **Emacs Lisp** (`Options::emacs_lisp`),
+**Racket** (`Options::racket`), **Janet** (`Options::janet`), **Hy** (`Options::hy`),
+**AutoLISP** (`Options::autolisp`), **Guile** (`Options::guile`), **Phel**
+(`Options::phel`), **Fennel** (`Options::fennel`), **LFE** (`Options::lfe`), and
+**ISLisp** (`Options::islisp`).
+
+Scheme, Clojure, Common Lisp, Emacs Lisp, and Racket are each exercised by a
+real-world corpus under `tests/corpus/` — chibi-scheme (610 files), clojure/clojure
+(142), cl-ppcre (23), lem (627 CL files), magit (49 elisp files), and typed-racket
+(1872 files) — all parse with zero errors. Janet, Hy, AutoLISP, Guile, Phel, Fennel,
+LFE, and ISLisp are covered by targeted unit tests (`tests/janet_hy_autolisp.rs`,
+`tests/guile.rs`, `tests/phel.rs`, `tests/fennel.rs`, `tests/lfe.rs`,
+`tests/islisp.rs`) rather than a corpus.
 
 Racket notes: the `#lang <name>` line is captured into `Parsed.lang_line` and not
 otherwise acted on (ADR-0012); `#:foo` keywords, `[]`/`{}` as code lists, `#'` syntax,

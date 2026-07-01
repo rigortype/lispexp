@@ -2,7 +2,8 @@
 //!
 //! [`Options`] is the orthogonal, individually-toggleable syntax configuration
 //! the Lexer and Reader share (ADR-0003). A [`Dialect`] is just a named preset
-//! constructor. Scheme, Clojure, Common Lisp, Emacs Lisp, and Racket are done.
+//! constructor. Scheme, Clojure, Common Lisp, Emacs Lisp, Racket, Janet, Hy,
+//! AutoLISP, Guile, Phel, Fennel, LFE, and ISLisp are all implemented.
 
 use crate::datum::Prefix;
 
@@ -68,6 +69,11 @@ pub enum Dialect {
     Janet,
     Hy,
     AutoLisp,
+    Guile,
+    Phel,
+    Fennel,
+    Lfe,
+    Islisp,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -425,6 +431,68 @@ impl Options {
         }
     }
 
+    /// Guile (a Scheme implementation with extensions).
+    pub fn guile() -> Self {
+        Options {
+            hash_keyword: true,                      // #:kw keywords
+            hash_apostrophe: Some(Prefix::VarQuote), // #'syntax
+            ..Options::scheme()
+        }
+    }
+
+    /// Phel (a Clojure-like Lisp that compiles to PHP).
+    pub fn phel() -> Self {
+        // Phel's reader is essentially Clojure's; #php tagged literals are
+        // already covered by tagged_literals.
+        Options::clojure()
+    }
+
+    /// Fennel (a Lisp that compiles to Lua).
+    pub fn fennel() -> Self {
+        Options {
+            block_comment: None,
+            datum_comment: false,
+            square: DelimRole::List, // [...] sequence
+            curly: DelimRole::Map,   // {...} table
+            booleans: false,         // true/false/nil are symbols
+            char_syntax: None,
+            hash_paren: HashParen::HashFn, // #(...) hashfn
+            keyword_colon: false,          // :foo is a string; kept as a symbol leaf
+            piped_symbols: false,
+            datum_labels: false,
+            dotted_pairs: false, // `.` is multi-symbol / method access
+            ..Options::scheme()
+        }
+    }
+
+    /// LFE (Lisp Flavoured Erlang).
+    pub fn lfe() -> Self {
+        Options {
+            block_comment: Some(BlockComment {
+                open: "#|",
+                close: "|#",
+                nestable: false, // LFE block comments do not nest
+            }),
+            regex_literal: true, // #"..." binary strings, lexed as a Str leaf
+            hash_apostrophe: Some(Prefix::FunctionQuote), // #'name/arity
+            booleans: false,     // 'true / 'false atoms
+            datum_labels: false,
+            ..Options::scheme()
+        }
+    }
+
+    /// ISLisp (ISO/IEC 13816).
+    pub fn islisp() -> Self {
+        Options {
+            square: DelimRole::Ordinary, // [] {} are ordinary symbol chars
+            keyword_colon: true,         // :keyword
+            hash_apostrophe: Some(Prefix::FunctionQuote), // #'fn
+            booleans: false,             // t / nil are symbols
+            datum_labels: false,
+            ..Options::scheme()
+        }
+    }
+
     /// Options for a named [`Dialect`].
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
@@ -436,6 +504,11 @@ impl Options {
             Dialect::Janet => Options::janet(),
             Dialect::Hy => Options::hy(),
             Dialect::AutoLisp => Options::autolisp(),
+            Dialect::Guile => Options::guile(),
+            Dialect::Phel => Options::phel(),
+            Dialect::Fennel => Options::fennel(),
+            Dialect::Lfe => Options::lfe(),
+            Dialect::Islisp => Options::islisp(),
         }
     }
 }
