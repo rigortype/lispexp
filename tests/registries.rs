@@ -65,14 +65,17 @@ fn edn_has_no_definitions() {
 
 #[test]
 fn consumer_can_extend_bundled_core() {
-    use lispexp::annotate::{FormSpec, Role};
+    use lispexp::annotate::{Confidence, Docstring, FormSpec, Role};
     // The bundled core is composable: a consumer overrides/extends it.
     let mut reg = bundled_registry(Dialect::Clojure);
     reg.insert(
-        FormSpec::define("defwidget", vec![Role::Name], true, true).with_category(Category::Macro),
+        FormSpec::define("defwidget", vec![Role::Name], Docstring::Leading, true)
+            .with_category(Category::Macro),
     );
     let data = parse("(defwidget button [] :ok)", &Options::clojure()).data;
     let a = annotate_form(&data[0], &reg).unwrap();
     assert_eq!(a.head, "defwidget");
     assert_eq!(a.category, Some(Category::Macro));
+    // Consumer-supplied specs carry their own provenance.
+    assert_eq!(a.confidence, Confidence::Consumer);
 }

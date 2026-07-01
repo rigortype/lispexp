@@ -94,6 +94,29 @@ fn unspecialized_param_has_no_specializer() {
 }
 
 #[test]
+fn cl_defmethod_docstring_is_tagged() {
+    let (data, reg) = annotate(
+        r#"(defmethod area ((s square)) "Compute the area." (* s s))"#,
+        Dialect::CommonLisp,
+    );
+    let a = annotate_form(&data[0], &reg).unwrap();
+    assert_eq!(
+        a.first(Role::Docstring).unwrap().kind,
+        DatumKind::Str("\"Compute the area.\"")
+    );
+}
+
+#[test]
+fn clojure_multi_arity_defmethod_clause_is_not_arglist() {
+    // `(defmethod f :x ([a] …) ([a b] …))` — the round arity clauses must not
+    // be tagged as the Arglist (Clojure arglists are square vectors).
+    let (data, reg) = annotate("(defmethod f :x ([a] a) ([a b] b))", Dialect::Clojure);
+    let a = annotate_form(&data[0], &reg).unwrap();
+    assert!(a.first(Role::Arglist).is_none());
+    assert_eq!(a.parts.iter().filter(|p| p.role == Role::Body).count(), 2);
+}
+
+#[test]
 fn clojure_defmethod_uses_dispatch_value() {
     let (data, reg) = annotate(
         "(defmethod area :circle [shape] (* 3 (:r shape)))",
