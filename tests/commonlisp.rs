@@ -32,11 +32,17 @@ fn feature_conditional_reads_two_forms() {
         2,
         "feature test + guarded form must be one datum"
     );
-    let DatumKind::Prefixed { prefix, inner, .. } = &data[0].kind else {
-        panic!("expected reader conditional")
+    let DatumKind::Prefixed {
+        prefix, inner, arg, ..
+    } = &data[0].kind
+    else {
+        panic!("expected feature conditional")
     };
-    assert_eq!(*prefix, Prefix::ReaderConditional(true));
+    assert_eq!(*prefix, Prefix::FeatureConditional { include: true });
     assert!(matches!(inner.kind, DatumKind::List { .. }));
+    // The feature test is retained as `arg` (T2), not dropped.
+    let feature = arg.as_ref().expect("feature test retained in arg");
+    assert_eq!(feature.kind, DatumKind::Symbol("sbcl"));
     assert_eq!(data[1].kind, DatumKind::Symbol("bar"));
 }
 
@@ -46,7 +52,7 @@ fn feature_conditional_minus() {
     assert!(matches!(
         data[0].kind,
         DatumKind::Prefixed {
-            prefix: Prefix::ReaderConditional(false),
+            prefix: Prefix::FeatureConditional { include: false },
             ..
         }
     ));
@@ -183,4 +189,18 @@ fn round_delimiter_only() {
     };
     assert_eq!(*delim, Delim::Round);
     assert_eq!(items.len(), 4);
+}
+
+#[test]
+fn longhand_fold_is_case_insensitive() {
+    // Common Lisp's reader is case-insensitive: `(QUOTE X)` folds to quote (T3).
+    let data = cl("(QUOTE X)");
+    let DatumKind::Prefixed {
+        prefix, notation, ..
+    } = &data[0].kind
+    else {
+        panic!("expected a folded quote, got {:?}", data[0].kind)
+    };
+    assert_eq!(*prefix, Prefix::Quote);
+    assert_eq!(*notation, Notation::Longhand);
 }

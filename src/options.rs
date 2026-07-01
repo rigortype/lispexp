@@ -225,6 +225,22 @@ pub struct Options {
     /// DSSSL/SRFI-88 style). Distinct from [`Self::keyword_colon`]'s leading
     /// `:foo`.
     pub keyword_trailing_colon: bool,
+    /// Whether `(quote x)` and friends are folded into a longhand
+    /// [`DatumKind::Prefixed`](crate::DatumKind::Prefixed) (ADR-0002). True for
+    /// the Scheme/Lisp family where quote is reader syntax; false for
+    /// Clojure/EDN/Janet/Hy/Fennel, whose longhand spellings differ or where
+    /// quote is not reader syntax. A per-family glyph gate applies on top:
+    /// `quote` folds only if [`Self::quote`] is set, etc.
+    pub fold_longhand: bool,
+    /// Whether the longhand fold matches the head symbol case-insensitively
+    /// (`(QUOTE X)` is `quote`). True for the case-insensitive readers
+    /// (Common Lisp, ISLisp, AutoLISP); false elsewhere (Emacs Lisp is
+    /// case-sensitive).
+    pub fold_case_insensitive: bool,
+    /// Whether `#{sym}#` extended symbols are recognized (Guile, ADR-0016):
+    /// `#{foo bar}#` is one verbatim [`Symbol`](crate::DatumKind::Symbol) token.
+    /// Mutually exclusive with [`Self::set_literal`] (both claim `#{`).
+    pub hash_curly_symbol: bool,
 }
 
 impl Options {
@@ -277,6 +293,9 @@ impl Options {
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
+            fold_longhand: true,
+            fold_case_insensitive: false,
+            hash_curly_symbol: false,
         }
     }
 
@@ -323,6 +342,11 @@ impl Options {
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
+            // Clojure's longhand spellings differ (`clojure.core/quote`) and
+            // its `'` is genuine reader syntax; do not fold `(quote x)`.
+            fold_longhand: false,
+            fold_case_insensitive: false,
+            hash_curly_symbol: false,
         }
     }
 
@@ -374,6 +398,10 @@ impl Options {
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
+            fold_longhand: true,
+            // Common Lisp's reader is case-insensitive: `(QUOTE X)` is quote.
+            fold_case_insensitive: true,
+            hash_curly_symbol: false,
         }
     }
 
@@ -420,6 +448,10 @@ impl Options {
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
+            // Emacs Lisp's reader IS case-sensitive.
+            fold_longhand: true,
+            fold_case_insensitive: false,
+            hash_curly_symbol: false,
         }
     }
 
@@ -461,6 +493,7 @@ impl Options {
             mutable: Some('@'), // `@[]` array, `@{}` table, `@"..."` buffer
             short_fn: Some('|'),
             long_string_backtick: true, // `` `...` ``
+            fold_longhand: false,       // Janet quote is `quote`/`quasiquote` fns, not folded
             ..Options::scheme()
         }
     }
@@ -484,6 +517,7 @@ impl Options {
             dotted_pairs: false,                      // `.` is attribute access
             unquote: Some('~'),                       // Clojure-style unquote
             hash_bracket: HashBracket::BracketString, // #[[...]] / #[DELIM[...]DELIM]
+            fold_longhand: false,                     // Hy longhand differs; `'` is reader syntax
             ..Options::scheme()
         }
     }
@@ -507,6 +541,7 @@ impl Options {
             datum_labels: false,
             quasiquote: None, // no backquote/unquote in AutoLISP
             unquote: None,
+            fold_case_insensitive: true, // AutoLISP's reader is case-insensitive
             ..Options::scheme()
         }
     }
@@ -516,6 +551,7 @@ impl Options {
         Options {
             hash_keyword: true,                      // #:kw keywords
             hash_apostrophe: Some(Prefix::VarQuote), // #'syntax
+            hash_curly_symbol: true,                 // #{foo bar}# extended symbols (ADR-0016)
             ..Options::scheme()
         }
     }
@@ -564,7 +600,8 @@ impl Options {
             keyword_colon: false,          // :foo is a string; kept as a symbol leaf
             piped_symbols: false,
             datum_labels: false,
-            dotted_pairs: false, // `.` is multi-symbol / method access
+            dotted_pairs: false,  // `.` is multi-symbol / method access
+            fold_longhand: false, // Fennel quote spellings differ; `'` is reader syntax
             ..Options::scheme()
         }
     }
@@ -593,6 +630,7 @@ impl Options {
             hash_apostrophe: Some(Prefix::FunctionQuote), // #'fn
             booleans: false,             // t / nil are symbols
             datum_labels: false,
+            fold_case_insensitive: true, // ISLisp's reader is case-insensitive
             ..Options::scheme()
         }
     }

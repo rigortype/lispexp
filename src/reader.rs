@@ -223,7 +223,7 @@ impl<'a, 'o> Parser<'a, 'o> {
         let t = self.advance()?;
         let line = self.line_of(t.span.start);
         let kind = match t.kind {
-            TokenKind::Open(delim) => return Some(self.finish_list(delim, t.span)),
+            TokenKind::Open(delim) => return Some(self.finish_list(delim, t.span, true)),
             TokenKind::HashOpen(delim) => return Some(self.finish_hash(delim, t.span)),
             TokenKind::Str => DatumKind::Str(self.text(t.span)),
             TokenKind::Char => DatumKind::Char(self.text(t.span)),
@@ -246,43 +246,36 @@ impl<'a, 'o> Parser<'a, 'o> {
                     line,
                 });
             }
-            TokenKind::Prefix(Prefix::ReaderConditional(sense))
+            TokenKind::Prefix(prefix @ Prefix::FeatureConditional { .. })
                 if self.opts.feature_conditional =>
             {
-                // Common Lisp `#+feature form` / `#-feature form`: read the
-                // feature test, then the guarded form. First cut: the feature
-                // test is consumed but not retained; the guarded form is kept so
-                // structure stays correct (one form).
-                let _feature = self.parse_datum();
+                // Common Lisp / Emacs Lisp `#+feature form` / `#-feature form`:
+                // read the feature test (retained as `arg`), then the guarded
+                // form (`inner`).
+                let feature = self.parse_datum().map(Box::new);
                 let inner = match self.parse_datum() {
                     Some(d) => d,
                     None => {
-                        self.error(
-                            t.span,
-                            ErrorKind::DanglingPrefix {
-                                prefix: Prefix::ReaderConditional(sense),
-                            },
-                        );
+                        self.error(t.span, ErrorKind::DanglingPrefix { prefix });
                         return None;
                     }
                 };
                 let span = Span::new(t.span.start, inner.span.end);
                 return Some(Datum {
                     kind: DatumKind::Prefixed {
-                        prefix: Prefix::ReaderConditional(sense),
+                        prefix,
                         notation: Notation::Shorthand,
                         inner: Box::new(inner),
+                        arg: feature,
                     },
                     span,
                     line,
                 });
             }
             TokenKind::Prefix(Prefix::Meta) => {
-                // `^meta target` / `#^meta target`: read the metadata form, then
-                // the target it annotates. First cut: the metadata is consumed
-                // but not retained; the target is returned wrapped (structure is
-                // correct — one form — but the metadata content is dropped).
-                let _meta = self.parse_datum();
+                // `^meta target` / `#^meta target`: read the metadata form
+                // (retained as `arg`), then the target it annotates (`inner`).
+                let meta = self.parse_datum().map(Box::new);
                 let inner = match self.parse_datum() {
                     Some(d) => d,
                     None => {
@@ -301,6 +294,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                         prefix: Prefix::Meta,
                         notation: Notation::Shorthand,
                         inner: Box::new(inner),
+                        arg: meta,
                     },
                     span,
                     line,
@@ -320,6 +314,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                         prefix,
                         notation: Notation::Shorthand,
                         inner: Box::new(inner),
+                        arg: None,
                     },
                     span,
                     line,
@@ -363,8 +358,11 @@ impl<'a, 'o> Parser<'a, 'o> {
     }
 
     /// Read list items until the matching close, then apply longhand-quote
-    /// folding (ADR-0002). `open` is the already-consumed opening token span.
-    fn finish_list(&mut self, delim: Delim, open: Span) -> Datum<'a> {
+    /// folding (ADR-0002) when `fold` is set and the dialect enables it. `open`
+    /// is the already-consumed opening token span. `fold` is `false` for a hash
+    /// literal's inner list (its contents are data — `#(quote x)` is a vector,
+    /// not a folded quote).
+    fn finish_list(&mut self, delim: Delim, open: Span, fold: bool) -> Datum<'a> {
         let line = self.line_of(open.start);
         let mut items: Vec<Datum<'a>> = Vec::new();
         let mut tail: Option<Box<Datum<'a>>> = None;
@@ -424,7 +422,11 @@ impl<'a, 'o> Parser<'a, 'o> {
             span: Span::new(open.start, end),
             line,
         };
-        fold_longhand(datum)
+        if fold && self.opts.fold_longhand {
+            fold_longhand(datum, self.opts)
+        } else {
+            datum
+        }
     }
 
     /// Read a `#(`-style hash literal: items until the matching close, wrapped
@@ -435,7 +437,9 @@ impl<'a, 'o> Parser<'a, 'o> {
         let tag = &self.source[open.start as usize + 1..open.end as usize - 1];
 
         let inner_open = Span::new(open.end - 1, open.end); // the '(' itself
-        let inner = self.finish_list(delim, inner_open);
+                                                            // A hash literal's inner list is data: do not fold `#(quote x)` into a
+                                                            // quote — it is a two-element vector.
+        let inner = self.finish_list(delim, inner_open, false);
         let span = Span::new(open.start, inner.span.end);
         Datum {
             kind: DatumKind::HashLiteral {
@@ -449,8 +453,11 @@ impl<'a, 'o> Parser<'a, 'o> {
 }
 
 /// Fold `(quote x)` and friends into a longhand [`DatumKind::Prefixed`]
-/// (ADR-0002). Only the exact two-element round-list shape qualifies.
-fn fold_longhand(datum: Datum<'_>) -> Datum<'_> {
+/// (ADR-0002). Only the exact two-element round-list shape qualifies, and only
+/// when the head names a quote-family form whose shorthand glyph the dialect
+/// actually has (`quote` iff `options.quote.is_some()`, etc.). Case-insensitive
+/// dialects (`options.fold_case_insensitive`) match `(QUOTE X)` too.
+fn fold_longhand<'a>(datum: Datum<'a>, opts: &Options) -> Datum<'a> {
     match datum.kind {
         DatumKind::List {
             delim: Delim::Round,
@@ -458,13 +465,14 @@ fn fold_longhand(datum: Datum<'_>) -> Datum<'_> {
             tail: None,
         } if items.len() == 2 => {
             if let DatumKind::Symbol(s) = items[0].kind {
-                if let Some(prefix) = quote_symbol(s) {
+                if let Some(prefix) = quote_symbol(s, opts) {
                     let inner = items.pop().unwrap(); // items[1]
                     return Datum {
                         kind: DatumKind::Prefixed {
                             prefix,
                             notation: Notation::Longhand,
                             inner: Box::new(inner),
+                            arg: None,
                         },
                         span: datum.span,
                         line: datum.line,
@@ -489,14 +497,33 @@ fn fold_longhand(datum: Datum<'_>) -> Datum<'_> {
     }
 }
 
-fn quote_symbol(s: &str) -> Option<Prefix> {
-    match s {
-        "quote" => Some(Prefix::Quote),
-        "quasiquote" => Some(Prefix::Quasiquote),
-        "unquote" => Some(Prefix::Unquote),
-        "unquote-splicing" => Some(Prefix::UnquoteSplicing),
-        _ => None,
+/// Map a longhand head symbol to the quote-family prefix it names, honoring the
+/// dialect's glyph gates and case sensitivity. `quote`/`quasiquote` require the
+/// corresponding shorthand glyph; `unquote`/`unquote-splicing` both require the
+/// unquote glyph (e.g. AutoLISP has `quote` but no quasiquote/unquote).
+fn quote_symbol(s: &str, opts: &Options) -> Option<Prefix> {
+    let eq = |name: &str| {
+        if opts.fold_case_insensitive {
+            s.eq_ignore_ascii_case(name)
+        } else {
+            s == name
+        }
+    };
+    if opts.quote.is_some() && eq("quote") {
+        return Some(Prefix::Quote);
     }
+    if opts.quasiquote.is_some() && eq("quasiquote") {
+        return Some(Prefix::Quasiquote);
+    }
+    if opts.unquote.is_some() {
+        if eq("unquote") {
+            return Some(Prefix::Unquote);
+        }
+        if eq("unquote-splicing") {
+            return Some(Prefix::UnquoteSplicing);
+        }
+    }
+    None
 }
 
 /// Extract the numeric id from a `#n=` / `#n#` label token's text.

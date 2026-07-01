@@ -1,6 +1,6 @@
 //! Reader tests for the Clojure dialect.
 
-use lispexp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Options, Prefix};
 
 fn clj(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::clojure());
@@ -161,7 +161,7 @@ fn reader_conditional() {
     let DatumKind::Prefixed { prefix, inner, .. } = &data[0].kind else {
         panic!()
     };
-    assert_eq!(*prefix, Prefix::ReaderConditional(false));
+    assert_eq!(*prefix, Prefix::ReaderConditional { splicing: false });
     assert!(matches!(inner.kind, DatumKind::List { .. }));
 }
 
@@ -170,10 +170,16 @@ fn metadata_wraps_target() {
     // Structure stays correct: one form, the vector, wrapped as Meta.
     let data = clj("^:dynamic [1 2]");
     assert_eq!(data.len(), 1);
-    let DatumKind::Prefixed { prefix, inner, .. } = &data[0].kind else {
+    let DatumKind::Prefixed {
+        prefix, inner, arg, ..
+    } = &data[0].kind
+    else {
         panic!("expected metadata-wrapped form")
     };
     assert_eq!(*prefix, Prefix::Meta);
+    // The metadata form is retained as `arg` (T2), not dropped.
+    let meta = arg.as_ref().expect("metadata retained in arg");
+    assert_eq!(meta.kind, DatumKind::Keyword(":dynamic"));
     assert!(matches!(
         inner.kind,
         DatumKind::List {
@@ -229,14 +235,14 @@ fn interop_dot_is_not_a_dotted_pair() {
 }
 
 #[test]
-fn quote_longhand_still_folds() {
+fn quote_longhand_not_folded() {
+    // Clojure must NOT fold `(quote x)` — its longhand spellings differ and `'`
+    // is genuine reader syntax (T3). It stays a plain two-element list.
     let data = clj("(quote x)");
-    assert!(matches!(
-        data[0].kind,
-        DatumKind::Prefixed {
-            prefix: Prefix::Quote,
-            notation: Notation::Longhand,
-            ..
-        }
-    ));
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!("expected an unfolded list, got {:?}", data[0].kind)
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, DatumKind::Symbol("quote"));
+    assert_eq!(items[1].kind, DatumKind::Symbol("x"));
 }

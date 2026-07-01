@@ -106,3 +106,16 @@ fn dialect_maps_to_edn() {
     let data = parse("@x", &Options::for_dialect(Dialect::Edn)).data;
     assert_eq!(data[0].kind, DatumKind::Symbol("@x"));
 }
+
+#[test]
+fn quote_longhand_not_folded() {
+    // EDN has no `'` reader syntax, so `(quote x)` must stay a plain list —
+    // never fold into a Prefixed quote (T3, ADR-0025).
+    let data = edn("(quote x)");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!("expected an unfolded list, got {:?}", data[0].kind)
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, DatumKind::Symbol("quote"));
+    assert_eq!(items[1].kind, DatumKind::Symbol("x"));
+}

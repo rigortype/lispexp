@@ -93,6 +93,7 @@ fn quote_shorthand() {
         prefix,
         notation,
         inner,
+        ..
     } = &data[0].kind
     else {
         panic!("expected prefixed")
@@ -109,6 +110,7 @@ fn quote_longhand_folds() {
         prefix,
         notation,
         inner,
+        ..
     } = &data[0].kind
     else {
         panic!("expected prefixed from longhand fold")
@@ -229,4 +231,22 @@ fn line_numbers() {
     assert_eq!(data[0].line, 1); // a
     assert_eq!(data[1].line, 2); // (b ...) starts on line 2
     assert_eq!(data[2].line, 4); // d
+}
+
+#[test]
+fn hash_vector_inner_quote_not_folded() {
+    // `#(quote x)` in Scheme is a two-element vector literal, NOT a folded
+    // quote — the hash literal's inner list is data (T3).
+    let data = scheme("#(quote x)");
+    let DatumKind::HashLiteral { tag, inner } = &data[0].kind else {
+        panic!("expected hash literal, got {:?}", data[0].kind)
+    };
+    assert_eq!(*tag, "");
+    let inner = inner.as_ref().expect("vector has an inner list");
+    let DatumKind::List { items, .. } = &inner.kind else {
+        panic!("expected inner list, got {:?}", inner.kind)
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, DatumKind::Symbol("quote"));
+    assert_eq!(items[1].kind, DatumKind::Symbol("x"));
 }

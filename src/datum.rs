@@ -49,6 +49,13 @@ pub enum DatumKind<'a> {
         notation: Notation,
         /// The datum the prefix applies to.
         inner: Box<Datum<'a>>,
+        /// The auxiliary datum some prefixes carry, if any: the metadata form
+        /// for [`Prefix::Meta`] (`^meta target`: `arg` is the metadata,
+        /// `inner` the target) and the feature test for
+        /// [`Prefix::FeatureConditional`] (`#+sbcl form`: `arg` is `sbcl`,
+        /// `inner` the guarded form). `None` for every other prefix. The
+        /// enclosing span covers glyph, `arg`, and `inner`.
+        arg: Option<Box<Datum<'a>>>,
     },
     /// Any `#tag`-shaped form; `tag` is captured verbatim and unvalidated
     /// (ADR-0011). E.g. `""` for `#(...)`, `"u8"` for `#u8(...)`.
@@ -113,8 +120,25 @@ pub enum Prefix {
     Meta,
     /// `#.x` — Common Lisp read-time eval.
     ReadEval,
-    /// `#+`/`#-` (CL feature) or `#?` (Clojure); the bool is the include sense.
-    ReaderConditional(bool),
+    /// `#+feature form` / `#-feature form` — Common Lisp / Emacs Lisp feature
+    /// conditional. `include` is the sense: `true` for `#+`, `false` for `#-`.
+    /// The feature test is carried in the `Prefixed` datum's `arg`; the guarded
+    /// form is `inner`. Gated by [`Options::feature_conditional`].
+    ///
+    /// [`Options::feature_conditional`]: crate::Options::feature_conditional
+    FeatureConditional {
+        /// `true` for `#+` (include when the feature holds), `false` for `#-`.
+        include: bool,
+    },
+    /// `#?(...)` / `#?@(...)` — Clojure reader conditional wrapping the next
+    /// list. `splicing` is `true` for `#?@`, `false` for `#?`. Gated by
+    /// [`Options::reader_conditional`].
+    ///
+    /// [`Options::reader_conditional`]: crate::Options::reader_conditional
+    ReaderConditional {
+        /// `true` for `#?@` (splicing), `false` for `#?`.
+        splicing: bool,
+    },
     /// Fennel `#expr`, Clojure/Phel `#(...)`, Janet `|(...)`.
     HashFn,
     /// Janet `;x` => `(splice x)`.

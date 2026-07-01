@@ -25,7 +25,9 @@
 //! - `HashLiteral` (`#(1 2 3)`, `#u8(...)`, tagged `#inst …`), `LabelRef`
 //!   (`#n#`), and `Discard` are `Data`.
 //! - `Meta`, `Mutable`, and `Label` are **context-transparent** (inherit the
-//!   parent's class); a `ReaderConditional`'s guarded form is transparent too.
+//!   parent's class); a `FeatureConditional`/`ReaderConditional`'s guarded form
+//!   is transparent too. A `Prefixed`'s auxiliary `arg` (metadata form /
+//!   feature test) is visited as `Data`.
 //!
 //! The visitor is primary because pruning cannot be expressed by a bare
 //! iterator. A pre-order iterator adapter may be layered on later.
@@ -107,8 +109,12 @@ fn inner_ctx(prefix: Prefix, ctx: Ctx) -> Ctx {
         | Prefix::HashFn => ctx,
         // `#.` is evaluated at *read* time — code even inside `quote`.
         Prefix::ReadEval => Ctx::TOP,
-        // Context-transparent wrappers.
-        Prefix::Meta | Prefix::Mutable | Prefix::ReaderConditional(_) => ctx,
+        // Context-transparent wrappers. A feature/reader conditional's guarded
+        // form and a metadata target inherit the surrounding class.
+        Prefix::Meta
+        | Prefix::Mutable
+        | Prefix::FeatureConditional { .. }
+        | Prefix::ReaderConditional { .. } => ctx,
         // Discarded content is inert. (The reader consumes `#_`/`#;` and never
         // emits a Discard-prefixed datum; kept for manually built trees.)
         Prefix::Discard => Ctx::DATA,
@@ -157,7 +163,14 @@ where
                 walk_datum(tail, ctx, visit)?;
             }
         }
-        DatumKind::Prefixed { prefix, inner, .. } => {
+        DatumKind::Prefixed {
+            prefix, inner, arg, ..
+        } => {
+            // The auxiliary datum (metadata form / feature test) is inert
+            // metadata: visit it as data before the inner form.
+            if let Some(arg) = arg {
+                walk_datum(arg, Ctx::DATA, visit)?;
+            }
             walk_datum(inner, inner_ctx(*prefix, ctx), visit)?;
         }
         // A hash literal's content is data; a datum label is transparent.

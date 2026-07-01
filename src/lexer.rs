@@ -419,7 +419,7 @@ impl<'a> Lexer<'a> {
             Some(c) if self.opts.feature_conditional && (c == '+' || c == '-') => {
                 self.bump();
                 self.token(
-                    TokenKind::Prefix(Prefix::ReaderConditional(c == '+')),
+                    TokenKind::Prefix(Prefix::FeatureConditional { include: c == '+' }),
                     start,
                 )
             }
@@ -434,7 +434,7 @@ impl<'a> Lexer<'a> {
                     self.bump();
                 }
                 self.token(
-                    TokenKind::Prefix(Prefix::ReaderConditional(splicing)),
+                    TokenKind::Prefix(Prefix::ReaderConditional { splicing }),
                     start,
                 )
             }
