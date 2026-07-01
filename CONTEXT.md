@@ -1,6 +1,6 @@
 # sexpp
 
-A pure-Rust reader (lexer + parser) for S-expression syntax across multiple Lisp dialects — Scheme, Racket, Common Lisp, Emacs Lisp, Clojure, Phel, Fennel, LFE, ISLisp, and AutoLISP — producing a faithful, position-annotated, code-vs-data-aware parse tree. It deliberately excludes evaluation and macro-expansion.
+A pure-Rust reader (lexer + parser) for S-expression syntax across multiple Lisp dialects — Scheme, Racket, Common Lisp, Emacs Lisp, Clojure, Hy, Phel, Fennel, LFE, ISLisp, and AutoLISP — producing a faithful, position-annotated, code-vs-data-aware parse tree. It deliberately excludes evaluation and macro-expansion.
 
 ## Language
 

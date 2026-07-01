@@ -100,6 +100,7 @@ impl Options {
     pub fn common_lisp() -> Self;
     pub fn emacs_lisp() -> Self;
     pub fn clojure() -> Self;
+    pub fn hy() -> Self;           // Python-style literals; ~/~@ unquote; #[[...]] bracket strings; commas not whitespace
     pub fn phel() -> Self;         // layers on clojure(): #php, extra number suffixes
     pub fn fennel() -> Self;       // :foo => Str (not Keyword); # => HashFn
     pub fn lfe() -> Self;          // #M/#S/#B, #<n>r radix, ;| |; ... no — see below; non-nesting handled per dialect
@@ -123,6 +124,11 @@ Orthogonal settings that presets configure (from the dialect survey):
   `(";|","|;",_)` for AutoLISP, none for Emacs Lisp/Fennel.
 - **String/char syntax**: R6RS/R7RS vs Elisp vs Clojure `\newline`; presence of char
   literals at all (AutoLISP has none). Raw slices retained regardless.
+- **Bracket strings** (ADR-0014): Hy's `#[[...]]` / `#[DELIM[...]DELIM]` balanced,
+  custom-delimiter strings — an Options-gated string-lexer feature emitting `Str`.
+  Python-style string prefixes (`r"" b"" f""`) are kept as part of the raw `Str` slice.
+- **Comma handling**: whitespace (Clojure/Phel), or ordinary/insignificant and usable
+  as a numeric digit separator (Hy), or plain insignificant (everyone else).
 - **Number vs symbol boundary**: a dialect-configured predicate. Value is never parsed;
   the reader only classifies "is this atom a number in this dialect." When ambiguous,
   default to `Symbol` (a mis-classified number is a harmless leaf; a mis-classified
@@ -156,3 +162,7 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
   (ADR-0007) — verify against a real implementation before locking the preset.
 - Exact per-dialect number-vs-symbol predicates: enumerate during each dialect's
   implementation, Scheme first.
+- Hy opaque-surface cases (ADR-0014): f-string embedded code is kept as an opaque
+  `Str` (under-counts embedded complexity — accepted); `foo.bar` dotted access is
+  kept as a single `Symbol` rather than expanded to `(. foo bar)`; `#!` shebang is
+  skipped as a leading line.
