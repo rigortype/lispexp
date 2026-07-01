@@ -16,12 +16,24 @@ whether EDN deserves its own preset.
 
 **Add a first-class `Options::edn()` preset that layers on `clojure()` (as Phel
 does) with the code-only reader syntax turned off:** `#(` anonymous functions,
-`#'` var-quote, `#?`/`#?@` reader conditionals, `#"…"` regex literals, and `@`
-deref are all disabled. Tagged elements (`#inst`, `#uuid`, user tags) and
-namespaced maps (`#:ns{…}`, already read as a tagged-literal marker on the
-following map) stay on, since they are valid EDN data. A valid `deps.edn` reads
-identically under `edn()` and `clojure()`; the preset makes the intent explicit
-and lets validation-minded consumers reject Clojure-only syntax in a data file.
+`#'` var-quote, `#?`/`#?@` reader conditionals, `#"…"` regex literals, `@`
+deref, `'` quote, the `` ` ``/`~`/`~@` syntax-quote family, and `^` metadata are
+all disabled — the EDN spec defines none of them. Tagged elements (`#inst`,
+`#uuid`, user tags), `#{}` sets, and `#_` discard stay on, since they are valid
+EDN. A valid `deps.edn` reads identically under `edn()` and `clojure()`; the
+preset makes the intent explicit and lets validation-minded consumers reject
+Clojure-only syntax in a data file.
+
+Namespaced maps (`#:ns{…}`, already read as a tagged-literal marker on the
+following map) also stay on — a pragmatic accommodation, not a spec claim:
+they are Clojure 1.9 reader syntax that the edn-format spec text never adopted,
+but `clojure.edn` accepts them and they appear in real `.edn` files in the wild.
+
+> **Amended 2026-07-02:** the original decision disabled only the five
+> `#`-flavored/`@` code forms and asserted namespaced maps "are valid EDN
+> data". An audit found both wrong: `'`/`` ` ``/`~`/`~@`/`^` are equally
+> non-EDN and are now disabled too, and the namespaced-map claim is corrected
+> to "accepted by `clojure.edn`, absent from the spec".
 
 **`info.rkt` needs no change.** `Options::racket()` already sets
 `lang_line: true`, so a leading `#lang info` is captured as the lang line and the

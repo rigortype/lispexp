@@ -84,6 +84,23 @@ fn hashfn_is_off() {
 }
 
 #[test]
+fn quote_family_is_off() {
+    // `'x`, `` `x ``, `~x`, and `^meta x` are Clojure code syntax, not EDN
+    // (ADR-0025): none of them may read as a Prefixed datum.
+    for src in ["'x", "`x", "~x", "~@x", "^:kw x"] {
+        let parsed = parse(src, &Options::edn());
+        assert!(
+            !parsed
+                .data
+                .iter()
+                .any(|d| matches!(d.kind, DatumKind::Prefixed { .. })),
+            "{src:?} must not read as a reader-macro form: {:?}",
+            parsed.data
+        );
+    }
+}
+
+#[test]
 fn dialect_maps_to_edn() {
     // Dialect::Edn round-trips through for_dialect.
     let data = parse("@x", &Options::for_dialect(Dialect::Edn)).data;

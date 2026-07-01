@@ -530,8 +530,12 @@ impl Options {
     /// EDN — a data-only preset layered on [`Options::clojure`] with the
     /// code-only reader syntax turned off (ADR-0025): `#(` anonymous functions,
     /// `#'` var-quote, `#?`/`#?@` reader conditionals, `#"…"` regex literals,
-    /// and `@` deref. Tagged elements (`#inst`, `#uuid`, user tags) and
-    /// namespaced maps (`#:ns{…}`) stay on, since they are valid EDN data.
+    /// `@` deref, `'` quote, `` ` ``/`~`/`~@` syntax-quote family, and `^`
+    /// metadata — none of these is EDN. Tagged elements (`#inst`, `#uuid`, user
+    /// tags), `#{}` sets, and `#_` discard stay on, since they are valid EDN.
+    /// Namespaced maps (`#:ns{…}`) also read (as a tagged-literal marker on the
+    /// following map): they are accepted by `clojure.edn` although absent from
+    /// the EDN spec text.
     pub fn edn() -> Self {
         Options {
             hash_paren: HashParen::None, // no `#(` anonymous functions
@@ -539,6 +543,10 @@ impl Options {
             reader_conditional: false,   // no `#?`/`#?@`
             regex_literal: false,        // no `#"…"` regex
             deref: None,                 // no `@` deref
+            quote: None,                 // no `'x` quote
+            quasiquote: None,            // no `` `x `` syntax-quote
+            unquote: None,               // no `~x` / `~@x`
+            meta: None,                  // no `^meta`
             ..Options::clojure()
         }
     }

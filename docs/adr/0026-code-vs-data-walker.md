@@ -26,15 +26,30 @@ complexity. The classification criterion is uniformly "can this be evaluated?"
 
 - `Quote` inner → `Data` (deep); `Quasiquote` inner → `Data` with unquotes
   flipping back per depth.
-- `VarQuote`/`FunctionQuote` (`#'foo`) → `Code` (a resolved var/function
-  reference); `Deref` (`@x`), `Splice` (Janet `;x`), `ReadEval` (`#.x`),
-  `HashFn` (`#(...)`) → `Code`.
+- `VarQuote`/`FunctionQuote` (`#'foo`), `Deref` (`@x`), `Splice` (Janet `;x`),
+  `HashFn` (`#(...)`) → **context-transparent**: code references at top level,
+  but inside a quasiquote template or quote they are data like their
+  surroundings (`` `(f @x) `` — `x` is template data; only an unquote flips it
+  back).
+- `ReadEval` (`#.x`) → `Code` **unconditionally** — `#.` is evaluated at *read*
+  time, so even a hard `Quote` cannot inert it.
 - `HashLiteral` (`#(1 2 3)`, `#u8(...)`, tagged `#inst …`) → `Data`;
-  `LabelRef` (`#n#`) → `Data`; `Discard` (`#_`/`#;`) → `Data`.
+  `LabelRef` (`#n#`) → `Data`; `Discard` (`#_`/`#;`) → `Data` (in practice the
+  reader consumes discards, so this arm only serves manually built trees).
 - `Meta` (`^m x`), `Mutable` (Janet `@{}`), `Label` inner → **context-transparent**
   (inherit the parent's class).
-- `ReaderConditional`: guarded forms are context-transparent; the feature-test
-  expression is `Data`.
+- `ReaderConditional`: the wrapped form is context-transparent. (The CL
+  feature-test datum is consumed and not retained by the reader, so no ruling
+  is needed for it; Clojure's `#?(:clj a)` wraps the whole list and its
+  feature keys inherit the surrounding class.)
+
+> **Amended 2026-07-02:** the original table sent `VarQuote`/`Deref`/etc. to
+> `Code` unconditionally, which reset the quasiquote depth (`` `(f @x) ``
+> classified `x` as code) and let `Quote` inert a `ReadEval` — both violations
+> of the "can this be evaluated?" criterion. The code-reference prefixes are
+> now context-transparent and `ReadEval` escapes even a hard quote. The
+> feature-test ruling was also unimplementable as written (the reader drops
+> the CL feature test) and is restated as above.
 
 **Nested quasiquote uses a depth counter, with quote as an absolute barrier.**
 The walker carries a quasiquote-depth along the path: `Quasiquote` `+1`,

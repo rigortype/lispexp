@@ -16,9 +16,12 @@
 //!   node is `Code` iff the quasiquote depth is 0 *and* it is not under a hard
 //!   `Quote`. This classifies double-unquote (`` `` `,,c `` ``) as `Code`, which
 //!   a boolean flag could not.
-//! - `VarQuote`/`FunctionQuote` (`#'foo`), `Deref` (`@x`), `Splice`, `ReadEval`,
-//!   and `HashFn` (`#(...)`) mark their contents as `Code` (unless under a hard
-//!   `Quote`, which wins).
+//! - `VarQuote`/`FunctionQuote` (`#'foo`), `Deref` (`@x`), `Splice`, and
+//!   `HashFn` (`#(...)`) are **context-transparent**: at top level they are code
+//!   references, but inside a quasiquote template or a quote they are data like
+//!   their surroundings (`` `(f @x) `` — `x` is template data).
+//! - `ReadEval` (`#.x`) marks its contents as `Code` **unconditionally** — `#.`
+//!   is evaluated at *read* time, even inside `quote`.
 //! - `HashLiteral` (`#(1 2 3)`, `#u8(...)`, tagged `#inst …`), `LabelRef`
 //!   (`#n#`), and `Discard` are `Data`.
 //! - `Meta`, `Mutable`, and `Label` are **context-transparent** (inherit the
@@ -90,22 +93,19 @@ fn inner_ctx(prefix: Prefix, ctx: Ctx) -> Ctx {
             qq: ctx.qq.saturating_sub(1),
             ..ctx
         },
-        // Code references: back to code — unless a hard quote encloses them.
+        // Code references are context-transparent: code at top level, but data
+        // inside a quasiquote template or quote (`` `(f @x) `` — `x` is data).
         Prefix::VarQuote
         | Prefix::FunctionQuote
         | Prefix::Deref
         | Prefix::Splice
-        | Prefix::ReadEval
-        | Prefix::HashFn => {
-            if ctx.hard_quote {
-                ctx
-            } else {
-                Ctx::TOP
-            }
-        }
+        | Prefix::HashFn => ctx,
+        // `#.` is evaluated at *read* time — code even inside `quote`.
+        Prefix::ReadEval => Ctx::TOP,
         // Context-transparent wrappers.
         Prefix::Meta | Prefix::Mutable | Prefix::ReaderConditional(_) => ctx,
-        // Discarded content is inert.
+        // Discarded content is inert. (The reader consumes `#_`/`#;` and never
+        // emits a Discard-prefixed datum; kept for manually built trees.)
         Prefix::Discard => Ctx::DATA,
     }
 }
@@ -245,6 +245,29 @@ mod tests {
     fn deref_is_code() {
         let c = Options::clojure();
         assert_eq!(class_of("@x", &c, "x"), Class::Code);
+    }
+
+    #[test]
+    fn deref_inside_quasiquote_stays_data() {
+        // `(f @x): the deref is template data at depth 1; it does not reset the
+        // quasiquote depth.
+        let c = Options::clojure();
+        assert_eq!(class_of("`(f @x)", &c, "x"), Class::Data);
+        // ...but an unquote around it flips back to code as usual.
+        assert_eq!(class_of("`(f ~@y)", &c, "y"), Class::Code);
+    }
+
+    #[test]
+    fn function_quote_inside_quote_stays_data() {
+        let c = Options::common_lisp();
+        assert_eq!(class_of("'(f #'a)", &c, "a"), Class::Data);
+    }
+
+    #[test]
+    fn read_eval_is_code_even_under_quote() {
+        // #. runs at read time — quote cannot inert it.
+        let c = Options::common_lisp();
+        assert_eq!(class_of("'(a #.(f))", &c, "(f)"), Class::Code);
     }
 
     #[test]
