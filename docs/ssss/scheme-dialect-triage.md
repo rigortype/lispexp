@@ -1,5 +1,18 @@
 # Scheme dialect triage: Gauche's reader extensions
 
+> **Update (resolved in `lispexp`).** This gap is now fixed *in the reader
+> itself*: `lispexp` ships an `Options::scheme_superset()` preset
+> (`Dialect::SchemeSuperset`, ADR-0027) that tolerates the `.scm`-shared reader
+> extensions of Gauche, Mosh, and Gambit — `#[…]` char-sets and `#/…/` regexps
+> as opaque `Str` leaves, plus `#"…"` interpolated strings, `#vu8(…)`
+> bytevectors, and trailing-colon `foo:` keywords. A consumer analyzing `.scm`
+> files should select `scheme_superset()` instead of `scheme()`; the per-file
+> desugar shim sketched under "Result" below is no longer needed downstream.
+> Re-running the same Gauche checkout under the new preset reproduces the
+> 288-errors-in-40-files → 3-errors-in-1-file result natively (the residual is
+> the `src/srfis.scm` "data after `(exit 0)`" idiom described at the end). The
+> analysis below is kept as the original reasoning record.
+
 `cccc-scheme` targets **R7RS-small** (see the crate's module doc). This note
 records what happens when it meets real-world Scheme code that goes beyond
 that — specifically [Gauche](https://practical-scheme.net/gauche/), a widely

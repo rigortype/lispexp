@@ -281,6 +281,73 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex a Gauche char-set literal `#[...]`. The `#` is already consumed; the
+    /// current char is `[`. Consumes up to the matching `]`. A `]` closes the
+    /// set (so `#[]` is the empty set); a literal `]` member must be escaped
+    /// `\]`; and a complete POSIX class `[:name:]` (optionally negated
+    /// `[:^name:]`) holds a `]` that does not close, mirroring Gauche's
+    /// `Scm_CharSetRead`. Emitted as an opaque [`TokenKind::Str`] leaf (the
+    /// reader does not descend into it).
+    fn lex_char_set(&mut self, start: usize) -> Token {
+        self.bump(); // '['
+        loop {
+            match self.peek() {
+                None => return self.token(TokenKind::Error, start), // unterminated
+                Some(']') => {
+                    self.bump();
+                    return self.token(TokenKind::Str, start);
+                }
+                Some('\\') => {
+                    self.bump();
+                    self.bump(); // escaped char (e.g. `\]`)
+                }
+                Some('[') => {
+                    // A well-formed POSIX class `[:name:]` holds a `]` that does
+                    // not close the set. Recognized only as a complete, bounded
+                    // token via lookahead; a bare `[` is an ordinary member, so
+                    // a malformed `[:` can never consume unbounded input.
+                    match posix_class_len(self.rest()) {
+                        Some(len) => {
+                            for _ in 0..len {
+                                self.bump();
+                            }
+                        }
+                        None => {
+                            self.bump(); // ordinary `[` member
+                        }
+                    }
+                }
+                Some(_) => {
+                    self.bump();
+                }
+            }
+        }
+    }
+
+    /// Lex a Gauche/Mosh regexp literal `#/.../`. The `#` is already consumed;
+    /// the current char is `/`. Consumes up to the next unescaped `/`, then an
+    /// optional single `i` (case-fold) flag — matching Gauche's `read_regexp`,
+    /// which reads exactly one char after the closing `/` and only honors `i`.
+    /// Emitted as an opaque [`TokenKind::Str`] leaf. Like Mosh's reader, the
+    /// pattern ends at the first unescaped `/` without tracking `[...]` classes.
+    fn lex_regex_slash(&mut self, start: usize) -> Token {
+        self.bump(); // '/'
+        loop {
+            match self.bump() {
+                Some('/') => break,
+                Some('\\') => {
+                    self.bump(); // escaped char (e.g. `\/`)
+                }
+                Some(_) => {}
+                None => return self.token(TokenKind::Error, start), // unterminated
+            }
+        }
+        if self.peek() == Some('i') {
+            self.bump(); // the sole case-fold flag
+        }
+        self.token(TokenKind::Str, start)
+    }
+
     fn lex_string(&mut self, start: usize) -> Token {
         self.bump(); // opening quote
         if self.consume_string_body() {
@@ -392,6 +459,25 @@ impl<'a> Lexer<'a> {
             Some('{') if self.opts.set_literal => {
                 self.bump();
                 self.token(TokenKind::Open(Delim::Set), start)
+            }
+            Some('[') if self.opts.char_set_literal => {
+                // Gauche char-set literal `#[...]` — opaque up to the matching
+                // `]` (respecting `\]`); may hold raw `(`/`[`/`/` bytes. Must
+                // precede the `#[`-hash-vector arm below, which would otherwise
+                // try to read the payload as a bracketed group.
+                self.lex_char_set(start)
+            }
+            Some('/') if self.opts.regex_slash => {
+                // Gauche/Mosh regexp literal `#/.../` with optional trailing
+                // flag letters — opaque up to the next unescaped `/`.
+                self.lex_regex_slash(start)
+            }
+            Some('v') if self.opts.bytevector_vu8 && self.rest().starts_with("vu8(") => {
+                // R6RS/Mosh bytevector `#vu8(...)`.
+                for _ in 0..4 {
+                    self.bump();
+                }
+                self.token(TokenKind::HashOpen(Delim::Round), start)
             }
             Some('[') if self.opts.bracket_string => {
                 // Hy bracket string `#[[...]]` / `#[DELIM[...]DELIM]`.
@@ -599,4 +685,23 @@ fn is_radix(c: char) -> bool {
         c,
         'e' | 'i' | 'b' | 'o' | 'd' | 'x' | 'E' | 'I' | 'B' | 'O' | 'D' | 'X'
     )
+}
+
+/// If `s` begins with a complete Gauche POSIX character-class token `[:name:]`
+/// (optionally negated `[:^name:]`), return its byte length. Bounded — Gauche
+/// caps the class name at `MAX_CHARSET_NAME_LEN` (11) and requires the closing
+/// `:]` — so a malformed `[:` inside a char-set can never consume unbounded
+/// input; the caller then treats the `[` as an ordinary member instead.
+fn posix_class_len(s: &str) -> Option<usize> {
+    let after_open = s.strip_prefix("[:")?;
+    let after_caret = after_open.strip_prefix('^').unwrap_or(after_open);
+    let name_len = after_caret
+        .bytes()
+        .take_while(|b| b.is_ascii_alphabetic())
+        .count();
+    if name_len == 0 || name_len > 11 {
+        return None;
+    }
+    let closed = after_caret[name_len..].strip_prefix(":]")?;
+    Some(s.len() - closed.len())
 }

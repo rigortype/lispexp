@@ -176,3 +176,23 @@ fn lem_corpus_parses() {
         &["extensions/vi-mode/tests/visual.lisp"],
     );
 }
+
+#[test]
+fn gauche_corpus_parses() {
+    // Gauche is an R7RS *superset*; read it with the tolerant `.scm` preset
+    // (ADR-0027), which absorbs `#[...]` char-sets, `#/.../` regexps, `#"..."`
+    // interpolated strings, and `#vu8(...)` bytevectors that strict R7RS chokes
+    // on. This drops the whole-checkout parse errors from 288 (40 files) under
+    // `Options::scheme` to 0 once the single residual file is excluded.
+    check_corpus(
+        "gauche",
+        &["scm"],
+        &Options::scheme_superset(),
+        800,
+        // Deliberately puts free-form documentation *after* an `(exit 0)` and
+        // re-reads it as runtime data (the Scheme analogue of Perl `__DATA__` /
+        // Ruby `__END__`). No static full-file reader can special-case this
+        // without modeling `exit`'s effect on read order — out of scope.
+        &["src/srfis.scm"],
+    );
+}

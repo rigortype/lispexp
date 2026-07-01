@@ -16,3 +16,6 @@
 [submodule "tests/corpus/typed-racket"]
 	path = tests/corpus/typed-racket
 	url = https://github.com/racket/typed-racket
+[submodule "tests/corpus/gauche"]
+	path = tests/corpus/gauche
+	url = https://github.com/shirok/Gauche

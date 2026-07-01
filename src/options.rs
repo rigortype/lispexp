@@ -3,7 +3,8 @@
 //! [`Options`] is the orthogonal, individually-toggleable syntax configuration
 //! the Lexer and Reader share (ADR-0003). A [`Dialect`] is just a named preset
 //! constructor. Scheme, Clojure, Common Lisp, Emacs Lisp, Racket, Janet, Hy,
-//! AutoLISP, Guile, Phel, Fennel, LFE, and ISLisp are all implemented.
+//! AutoLISP, Guile, Phel, Fennel, LFE, and ISLisp are all implemented, plus a
+//! tolerant [`Options::scheme_superset`] for arbitrary `.scm` files.
 
 use crate::datum::Prefix;
 
@@ -94,6 +95,10 @@ pub enum Dialect {
     Lfe,
     /// ISLisp.
     Islisp,
+    /// A tolerant `.scm` "Scheme superset" — R7RS-small widened with the
+    /// non-conflicting reader extensions of the `.scm`-using implementations
+    /// (Gauche, Mosh, Gambit). See [`Options::scheme_superset`].
+    SchemeSuperset,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -177,6 +182,21 @@ pub struct Options {
     pub long_string_backtick: bool,
     /// Whether `#[DELIM[...]DELIM]` is a bracket string (Hy).
     pub bracket_string: bool,
+    /// Whether `#[...]` is a character-set literal (Gauche), consumed as an
+    /// opaque leaf up to the matching `]` (respecting `\]`). Takes precedence
+    /// over the `#[` hash-vector reading of an active `[` delimiter.
+    pub char_set_literal: bool,
+    /// Whether `#/.../` (with optional trailing flag letters) is a regexp
+    /// literal (Gauche, Mosh), consumed as an opaque leaf up to the next
+    /// unescaped `/`.
+    pub regex_slash: bool,
+    /// Whether `#vu8(...)` opens a bytevector (R6RS spelling; Mosh). The R7RS
+    /// `#u8(...)` spelling is governed by [`HashParen::Vector`] independently.
+    pub bytevector_vu8: bool,
+    /// Whether a token ending in `:` is a keyword (`foo:` — Gambit/Gerbil,
+    /// DSSSL/SRFI-88 style). Distinct from [`Self::keyword_colon`]'s leading
+    /// `:foo`.
+    pub keyword_trailing_colon: bool,
 }
 
 impl Options {
@@ -226,6 +246,10 @@ impl Options {
             short_fn: None,
             long_string_backtick: false,
             bracket_string: false,
+            char_set_literal: false,
+            regex_slash: false,
+            bytevector_vu8: false,
+            keyword_trailing_colon: false,
         }
     }
 
@@ -269,6 +293,10 @@ impl Options {
             short_fn: None,
             long_string_backtick: false,
             bracket_string: false,
+            char_set_literal: false,
+            regex_slash: false,
+            bytevector_vu8: false,
+            keyword_trailing_colon: false,
         }
     }
 
@@ -317,6 +345,10 @@ impl Options {
             short_fn: None,
             long_string_backtick: false,
             bracket_string: false,
+            char_set_literal: false,
+            regex_slash: false,
+            bytevector_vu8: false,
+            keyword_trailing_colon: false,
         }
     }
 
@@ -360,6 +392,10 @@ impl Options {
             short_fn: None,
             long_string_backtick: false,
             bracket_string: false,
+            char_set_literal: false,
+            regex_slash: false,
+            bytevector_vu8: false,
+            keyword_trailing_colon: false,
         }
     }
 
@@ -513,6 +549,37 @@ impl Options {
         }
     }
 
+    /// A tolerant "Scheme superset" for reading arbitrary `.scm` files.
+    ///
+    /// R7RS-small ([`Options::scheme`]) widened with the non-conflicting reader
+    /// extensions of the implementations that share the `.scm` extension —
+    /// Gauche, Mosh, and Gambit. Chosen so real R7RS code still parses exactly
+    /// as it does under [`Options::scheme`], while the previously-fatal token
+    /// shapes (`#[...]` char-sets, `#/.../` regexps) and other superset-only
+    /// syntax stop losing reader sync:
+    ///
+    /// - `#[...]` character-set literals and `#/.../` regexps (Gauche/Mosh) are
+    ///   consumed as opaque [`DatumKind::Str`](crate::DatumKind::Str) leaves.
+    /// - `#"..."` (Gauche interpolated strings) is lexed as a string leaf.
+    /// - `#vu8(...)` bytevectors (R6RS/Mosh) alongside R7RS `#u8(...)`.
+    /// - trailing-colon keywords `foo:` (Gambit/Gerbil, DSSSL/SRFI-88).
+    ///
+    /// These are all *widenings*: each only affects input the strict reader
+    /// would have rejected or split, never reclassifying valid R7RS in a way
+    /// that changes tree shape (a mis-guessed keyword vs. symbol is still a
+    /// leaf, never a sync loss). Gerbil's `.ss`-only `[]`→`(@list …)` /
+    /// `{}`→`(@method …)` conventions are out of scope; `{` `}` stay ordinary.
+    pub fn scheme_superset() -> Self {
+        Options {
+            char_set_literal: true,       // Gauche  #[...]
+            regex_slash: true,            // Gauche/Mosh  #/.../
+            regex_literal: true,          // Gauche  #"..." interpolated string (Str leaf)
+            bytevector_vu8: true,         // Mosh/R6RS  #vu8(...)
+            keyword_trailing_colon: true, // Gambit/Gerbil  foo:
+            ..Options::scheme()
+        }
+    }
+
     /// Options for a named [`Dialect`].
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
@@ -529,6 +596,7 @@ impl Options {
             Dialect::Fennel => Options::fennel(),
             Dialect::Lfe => Options::lfe(),
             Dialect::Islisp => Options::islisp(),
+            Dialect::SchemeSuperset => Options::scheme_superset(),
         }
     }
 }

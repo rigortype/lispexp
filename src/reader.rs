@@ -49,6 +49,7 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
         errors: Vec::new(),
         keyword_colon: options.keyword_colon,
         hash_keyword: options.hash_keyword,
+        keyword_trailing_colon: options.keyword_trailing_colon,
         dotted_pairs: options.dotted_pairs,
         feature_conditional: options.feature_conditional,
     };
@@ -74,6 +75,7 @@ struct Parser<'a> {
     errors: Vec<ParseError>,
     keyword_colon: bool,
     hash_keyword: bool,
+    keyword_trailing_colon: bool,
     dotted_pairs: bool,
     feature_conditional: bool,
 }
@@ -159,9 +161,12 @@ impl<'a> Parser<'a> {
             TokenKind::Str => DatumKind::Str(self.text(t.span)),
             TokenKind::Char => DatumKind::Char(self.text(t.span)),
             TokenKind::Bool(b) => DatumKind::Bool(b),
-            TokenKind::Atom => {
-                classify_atom(self.text(t.span), self.keyword_colon, self.hash_keyword)
-            }
+            TokenKind::Atom => classify_atom(
+                self.text(t.span),
+                self.keyword_colon,
+                self.hash_keyword,
+                self.keyword_trailing_colon,
+            ),
             TokenKind::HashTag => {
                 // `#tag <form>`: attach the tag to the following datum.
                 let tag = &self.text(t.span)[1..]; // drop leading '#'
@@ -428,7 +433,12 @@ fn close_matches(open: Delim, close: Delim) -> bool {
     }
 }
 
-fn classify_atom(text: &str, keyword_colon: bool, hash_keyword: bool) -> DatumKind<'_> {
+fn classify_atom(
+    text: &str,
+    keyword_colon: bool,
+    hash_keyword: bool,
+    keyword_trailing_colon: bool,
+) -> DatumKind<'_> {
     if hash_keyword && text.starts_with("#:") {
         return DatumKind::Keyword(text);
     }
@@ -436,10 +446,16 @@ fn classify_atom(text: &str, keyword_colon: bool, hash_keyword: bool) -> DatumKi
         return DatumKind::Keyword(text);
     }
     if looks_like_number(text) {
-        DatumKind::Number(text)
-    } else {
-        DatumKind::Symbol(text)
+        return DatumKind::Number(text);
     }
+    // Gambit/Gerbil trailing-colon keyword `foo:` (DSSSL/SRFI-88): an
+    // *identifier* followed by `:`. Checked after `looks_like_number` so a
+    // numeric-looking atom (`1:`, `#xFF:`) stays a Number as under strict R7RS;
+    // a bare `:` is an ordinary symbol, so require a char before the colon.
+    if keyword_trailing_colon && text.len() > 1 && text.ends_with(':') {
+        return DatumKind::Keyword(text);
+    }
+    DatumKind::Symbol(text)
 }
 
 /// Coarse "is this a number in Scheme" check (ADR: value never interpreted).
