@@ -1,12 +1,12 @@
 [package]
 name = "sexpp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.70"
 license = "Apache-2.0"
-description = "A pure-Rust reader (lexer + parser) for S-expression syntax across many Lisp dialects"
+description = "DEPRECATED: renamed to `lispexp`. A pure-Rust reader (lexer + parser) for S-expression syntax across many Lisp dialects."
 readme = "README.md"
-repository = "https://github.com/rigortype/sexpp"
+repository = "https://github.com/rigortype/lispexp"
 authors = ["USAMI Kenta <tadsan@zonu.me>"]
 keywords = ["lisp", "s-expression", "parser", "scheme", "reader"]
 categories = ["parser-implementations"]

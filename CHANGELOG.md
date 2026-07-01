@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-02
+
+**This crate has been renamed to [`lispexp`](https://crates.io/crates/lispexp).** `sexpp` receives no further updates; please migrate. This release only adds the deprecation notice.
+
+### Deprecated
+
+- The `sexpp` crate is deprecated in favour of [`lispexp`](https://crates.io/crates/lispexp), which has an identical API. Replace `sexpp = "0.1"` with `lispexp = "0.1"` and `use sexpp::…` with `use lispexp::…`.
+
 ## [0.1.0] - 2026-07-02
 
 Initial release: a pure-Rust, reader-only lexer and parser for S-expression syntax across 13 Lisp dialects, plus a best-effort Emacs Lisp definition-form annotator. It reads code into a faithful, position-annotated tree; it does not evaluate or expand macros.
@@ -18,5 +26,6 @@ Initial release: a pure-Rust, reader-only lexer and parser for S-expression synt
 - `sexpp::annotate`: a definition-form annotator that tags a form's parts (name, arglist, docstring, body) using declared metadata and a spec harvester that reads Emacs Lisp def-macros' own arglist parameter names.
 - Continuous parse-conformance corpus tests over real-world code (chibi-scheme, clojure/clojure, cl-ppcre, lem, magit, typed-racket).
 
-[Unreleased]: https://github.com/rigortype/sexpp/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/rigortype/sexpp/releases/tag/v0.1.0
+[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.1.0...HEAD
+[0.1.1]: https://crates.io/crates/sexpp/0.1.1
+[0.1.0]: https://github.com/rigortype/lispexp/releases/tag/v0.1.0
