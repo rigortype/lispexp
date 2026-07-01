@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+Implements seven lisplens-driven feature requests (ADR-0020..0026): polyglot definition registries, method dispatch signatures, an indent-spec table, structured parse errors with positioned reparse, a line index, an EDN preset, and a code-vs-data walker.
+
 ### Added
 
+- `annotate::bundled_registry(Dialect)`: a conservative, high-confidence core `Registry` of definition forms per dialect, plus an optional normalized `Category` hint on `FormSpec` and a `FormSpec::define` builder so consumers extend or override the bundled core (ADR-0020).
+- Dispatch/method annotation (ADR-0021): a variable-length `Role::Qualifier`, a separate `Role::DispatchValue` for Clojure `defmethod`, and a `Role::SpecializedArglist` with `Annotated::specialized_params` splitting each required parameter into a verbatim `(variable, specializer)` pair.
+- `indent::{IndentTable, IndentSpec, harvest_indent_specs}`: a first-class `symbol → IndentSpec` table harvested from Emacs Lisp `(declare (indent …))` and `lisp-indent-function`, independent of the definition registry (ADR-0022).
+- `parse_form_at`: a positioned single-form reparse returning the form, its errors, and the end offset, with spans absolute into the source (ADR-0023).
+- `LineIndex`: a public byte-offset ↔ 1-based (line, byte-column) index over a `&str`, with `line_range` (ADR-0024).
+- `Options::edn()` and `Dialect::Edn`: a data-only preset layered on Clojure with code-only reader syntax disabled (ADR-0025).
+- `walk` with `Class`/`Walk`: a code-vs-data pruning visitor implementing the quasiquote-depth flip rules and prefix ruling table (ADR-0026).
 - `Options::scheme_superset()` (`Dialect::SchemeSuperset`): a tolerant `.scm`
   "Scheme superset" preset that reads the reader extensions shared by Gauche,
   Mosh, and Gambit — `#[...]` char-set literals and `#/.../` regexps (as opaque
@@ -23,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Breaking:** `ParseError` now carries a structured, `#[non_exhaustive]` `ErrorKind` instead of a free-form `message: String`; the human message is rendered via `Display`. Errors are now comparable and hashable independent of source position (ADR-0023).
 - `Options` and `Dialect` are now `#[non_exhaustive]`, so future syntax toggles
   and dialects can be added without a breaking change. Construct `Options` from
   a preset (e.g. `Options::scheme()`) and adjust fields via `..`, and add a
