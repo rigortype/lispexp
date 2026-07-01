@@ -12,13 +12,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   "Scheme superset" preset that reads the reader extensions shared by Gauche,
   Mosh, and Gambit — `#[...]` char-set literals and `#/.../` regexps (as opaque
   `Str` leaves), `#"..."` interpolated strings, `#vu8(...)` bytevectors, and
-  trailing-colon `foo:` keywords. `Options::scheme()` stays exact R7RS-small; the
+  both leading-colon `:foo` (Gauche/Guile) and trailing-colon `foo:`
+  (Gambit/Gerbil) keywords. `Options::scheme()` stays exact R7RS-small; the
   superset is a strict widening consumers opt into for arbitrary `.scm` files.
   On a full Gauche checkout this drops parse errors from 288 (40 files) to 3
   (1 file). See ADR-0027.
 - New `Options` fields backing the above: `char_set_literal`, `regex_slash`,
   `bytevector_vu8`, `keyword_trailing_colon`.
 - A Gauche corpus conformance test.
+
+### Changed
+
+- `Options` and `Dialect` are now `#[non_exhaustive]`, so future syntax toggles
+  and dialects can be added without a breaking change. Construct `Options` from
+  a preset (e.g. `Options::scheme()`) and adjust fields via `..`, and add a
+  wildcard arm when matching on `Dialect`. (Breaking for downstream crates that
+  built `Options`/matched `Dialect` exhaustively; warrants a 0.2.0 release.)
 
 ## [0.1.1] - 2026-07-02
 

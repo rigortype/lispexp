@@ -156,9 +156,22 @@ fn gambit_trailing_colon_keyword() {
 }
 
 #[test]
-fn bare_colon_is_a_symbol_not_keyword() {
+fn gauche_leading_colon_keyword() {
+    let data = sup("(make <point> :x 0 :y 1)");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!("expected list: {data:?}");
+    };
+    assert_eq!(items[2].kind, DatumKind::Keyword(":x"));
+    assert_eq!(items[4].kind, DatumKind::Keyword(":y"));
+}
+
+#[test]
+fn bare_colon_is_a_keyword() {
+    // Gauche's own reader reads `:` as a keyword — its test suite asserts
+    // `(keyword? (read-from-string ":"))` (tests/symkey.scm). Matches the
+    // leading-colon behavior of Common Lisp / ISLisp here.
     let data = sup(":");
-    assert_eq!(data[0].kind, DatumKind::Symbol(":"));
+    assert_eq!(data[0].kind, DatumKind::Keyword(":"));
 }
 
 #[test]

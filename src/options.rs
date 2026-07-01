@@ -67,7 +67,11 @@ pub enum HashParen {
 }
 
 /// A named dialect. Presets are constructed via [`Options`].
+///
+/// `#[non_exhaustive]`: new dialects are added over time, so downstream `match`es
+/// must include a wildcard arm; adding a variant is not a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Dialect {
     /// R7RS-small Scheme.
     Scheme,
@@ -103,7 +107,12 @@ pub enum Dialect {
 
 /// Reader/lexer configuration. Construct via a preset such as
 /// [`Options::scheme`] or [`Options::clojure`], then adjust fields if needed.
+///
+/// `#[non_exhaustive]`: build from a preset and tweak fields (`Options {
+/// square: DelimRole::List, ..Options::scheme() }`) rather than naming every
+/// field, so adding a syntax toggle is not a breaking change.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Options {
     /// Character that starts a line comment (`;` for most; `#` for Janet).
     pub line_comment: char,
@@ -562,7 +571,8 @@ impl Options {
     ///   consumed as opaque [`DatumKind::Str`](crate::DatumKind::Str) leaves.
     /// - `#"..."` (Gauche interpolated strings) is lexed as a string leaf.
     /// - `#vu8(...)` bytevectors (R6RS/Mosh) alongside R7RS `#u8(...)`.
-    /// - trailing-colon keywords `foo:` (Gambit/Gerbil, DSSSL/SRFI-88).
+    /// - leading-colon `:foo` (Gauche/Guile) and trailing-colon `foo:`
+    ///   (Gambit/Gerbil, DSSSL/SRFI-88) keywords.
     ///
     /// These are all *widenings*: each only affects input the strict reader
     /// would have rejected or split, never reclassifying valid R7RS in a way
@@ -575,6 +585,7 @@ impl Options {
             regex_slash: true,            // Gauche/Mosh  #/.../
             regex_literal: true,          // Gauche  #"..." interpolated string (Str leaf)
             bytevector_vu8: true,         // Mosh/R6RS  #vu8(...)
+            keyword_colon: true,          // Gauche/Guile  :foo
             keyword_trailing_colon: true, // Gambit/Gerbil  foo:
             ..Options::scheme()
         }
