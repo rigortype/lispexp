@@ -63,8 +63,12 @@ pub enum Prefix {
     Discard,                                        // #; (Scheme) / #_ (Clojure/Phel)
     VarQuote, FunctionQuote, Deref, Meta,           // #'  #'  @  ^
     ReadEval, ReaderConditional(bool),              // #.  #+/#-  (Common Lisp)
-    HashFn,                                          // Fennel `#expr`, Clojure/Phel `#(...)`
+    HashFn,                                          // Fennel `#expr`, Clojure/Phel `#(...)`, Janet `|(...)`
+    Splice,                                         // Janet `;x` => (splice x)
+    Mutable,                                        // Janet `@x` (@{} table, @[] array, @"" buffer)
 }
+// The glyph that triggers each Prefix is a per-dialect table (ADR-0016), e.g. Janet
+// maps `~`->Quasiquote, `,`->Unquote, `;`->Splice — not the Scheme/Clojure assignments.
 
 pub enum Notation { Shorthand, Longhand }
 
@@ -129,6 +133,7 @@ pub struct Options { /* fields below */ }
 
 impl Options {
     pub fn scheme() -> Self;
+    pub fn guile() -> Self;        // layers on scheme(): #{...}# symbols, #!...!# comments, #!fold-case directives
     pub fn racket() -> Self;       // layers on scheme(): #: keywords, #hash/#px/#rx/#s/#&, {} as List, #lang
     pub fn common_lisp() -> Self;
     pub fn emacs_lisp() -> Self;
@@ -139,6 +144,7 @@ impl Options {
     pub fn lfe() -> Self;          // #M/#S/#B, #<n>r radix, ;| |; ... no — see below; non-nesting handled per dialect
     pub fn islisp() -> Self;       // [] {} Ordinary; #<n>a arrays
     pub fn autolisp() -> Self;     // block comment `;| ... |;`; quote-only; no char literals
+    pub fn janet() -> Self;        // `#` line comments (not `;`); `;`=splice, `@`=mutable; [] tuple, {} struct; backtick long strings
 }
 ```
 
@@ -164,6 +170,13 @@ Orthogonal settings that presets configure (from the dialect survey):
   (`r"" b"" f""`) are kept as part of the raw `Str` slice.
 - **Comma handling**: whitespace (Clojure/Phel), or ordinary/insignificant and usable
   as a numeric digit separator (Hy), or plain insignificant (everyone else).
+- **Line-comment introducer** (ADR-0016): `;` for most dialects, but `#` for Janet
+  (where `;` is instead the splice reader macro). A per-dialect character, not fixed.
+- **Reader-glyph → Prefix role table** (ADR-0016): which punctuation triggers which
+  `Prefix` is per-dialect — Janet maps `~`->Quasiquote, `,`->Unquote, `;`->Splice,
+  `@`->Mutable, `|`->HashFn; Scheme/Clojure use their own assignments.
+- **Symbol delimiters** (ADR-0016): the pairs that delimit a symbol with special
+  characters — `|...|` (most), plus `#{...}#` for Guile. A set of pairs, not one form.
 - **Number vs symbol boundary**: a dialect-configured predicate. Value is never parsed;
   the reader only classifies "is this atom a number in this dialect." When ambiguous,
   default to `Symbol` (a mis-classified number is a harmless leaf; a mis-classified

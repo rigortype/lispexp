@@ -6,7 +6,7 @@ sexpp is deliberately reader-only: it does **not** evaluate, expand macros, or i
 
 ## Features
 
-- **One reader, many dialects.** [Scheme][]([R<sup>7</sup>RS-small][R7RS]), [Racket], [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], and [AutoLISP] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
+- **One reader, many dialects.** [Scheme][]([R<sup>7</sup>RS-small][R7RS]), [Guile], [Racket], [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], and [Janet] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
 - **Position-annotated.** Every datum carries a byte span and 1-based start line.
 - **Code vs. data aware.** Quote/quasiquote/unquote structure is preserved so consumers can descend into code and skip quoted data.
 - **Fault-tolerant.** Malformed input never panics; the reader returns a partial tree plus diagnostics, resynchronizing at the next top-level form.
@@ -37,6 +37,7 @@ limitations under the License.
 
 [Scheme]: https://www.scheme.org/
 [R7RS]: https://r7rs.org/
+[Guile]: https://www.gnu.org/software/guile/
 [Racket]: https://racket-lang.org/
 [Common Lisp]: https://common-lisp.net/
 [Emacs Lisp]: https://www.gnu.org/software/emacs/manual/html_node/elisp/index.html
@@ -47,3 +48,4 @@ limitations under the License.
 [LFE]: https://lfe.io/
 [ISLisp]: https://www.islisp.org/
 [AutoLISP]: https://help.autodesk.com/view/OARXMAC/2022/ENU/?guid=GUID-16DC15FC-5329-492E-B66A-401D49CF971F
+[Janet]: https://janet-lang.org/
