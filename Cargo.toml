@@ -1,12 +1,16 @@
 [package]
 name = "sexpp"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
 license = "Apache-2.0"
 description = "A pure-Rust reader (lexer + parser) for S-expression syntax across many Lisp dialects"
 readme = "README.md"
+authors = ["USAMI Kenta <tadsan@zonu.me>"]
 keywords = ["lisp", "s-expression", "parser", "scheme", "reader"]
 categories = ["parser-implementations"]
+# The corpus submodules under tests/corpus/ are large third-party checkouts used
+# only for local conformance testing — never ship them in the published package.
+exclude = ["/tests/corpus", "/AGENTS.md", "/docs/agents"]
 
 [dependencies]

@@ -7,8 +7,10 @@ use crate::span::Span;
 /// top-level form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
+    /// Byte range the diagnostic points at.
     pub span: Span,
     /// 1-based line.
     pub line: u32,
+    /// Human-readable description of the problem.
     pub message: String,
 }

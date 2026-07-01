@@ -8,15 +8,20 @@ use crate::span::Span;
 /// recovered by slicing the source.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Token {
+    /// The lexeme's classification.
     pub kind: TokenKind,
+    /// The lexeme's byte range in the source.
     pub span: Span,
 }
 
 /// The classification of a [`Token`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
+    /// A run of whitespace (and commas, where they are whitespace).
     Whitespace,
+    /// A line comment.
     LineComment,
+    /// A block comment.
     BlockComment,
     /// A `#lang <name>` directive line (Racket); captured, then treated as
     /// trivia by the reader (ADR-0012).
@@ -35,6 +40,7 @@ pub enum TokenKind {
     Str,
     /// A character literal such as `#\a` or `#\space`.
     Char,
+    /// A boolean literal (`#t`/`#f`).
     Bool(bool),
     /// A symbol or number; the reader classifies which.
     Atom,

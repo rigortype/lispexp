@@ -11,8 +11,18 @@
 //!   consumers like a parinfer backend that need lexical state, not a tree.
 //! - [`parse`] — builds the [`Parsed`] datum tree on top of the lexer.
 //!
-//! The first implemented dialect is Scheme ([`Options::scheme`]).
+//! # Example
+//!
+//! ```
+//! use sexpp::{parse, DatumKind, Options};
+//!
+//! let parsed = parse("(define (square x) (* x x))", &Options::scheme());
+//! assert!(parsed.errors.is_empty());
+//! let DatumKind::List { items, .. } = &parsed.data[0].kind else { unreachable!() };
+//! assert_eq!(items[0].kind, DatumKind::Symbol("define"));
+//! ```
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 
 pub mod annotate;
 mod datum;

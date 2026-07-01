@@ -15,14 +15,18 @@ use crate::datum::Prefix;
 /// meaning a consumer assigns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DelimRole {
+    /// An alternate list delimiter (Scheme `[]`).
     List,
+    /// A vector literal (Emacs Lisp `[]`).
     Vector,
+    /// A map literal (Clojure `{}`).
     Map,
     /// Not a delimiter — an ordinary symbol-constituent character (e.g. ISLisp).
     Ordinary,
 }
 
 impl DelimRole {
+    /// Whether this role makes the bracket an active delimiter (not `Ordinary`).
     pub fn is_delimiter(self) -> bool {
         self != DelimRole::Ordinary
     }
@@ -31,8 +35,11 @@ impl DelimRole {
 /// A block-comment delimiter pair (ADR-0007).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockComment {
+    /// The opening delimiter (e.g. `#|`).
     pub open: &'static str,
+    /// The closing delimiter (e.g. `|#`).
     pub close: &'static str,
+    /// Whether the pair nests.
     pub nestable: bool,
 }
 
@@ -61,18 +68,31 @@ pub enum HashParen {
 /// A named dialect. Presets are constructed via [`Options`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dialect {
+    /// R7RS-small Scheme.
     Scheme,
+    /// Clojure.
     Clojure,
+    /// ANSI Common Lisp.
     CommonLisp,
+    /// Emacs Lisp.
     EmacsLisp,
+    /// Racket.
     Racket,
+    /// Janet.
     Janet,
+    /// Hy.
     Hy,
+    /// AutoLISP.
     AutoLisp,
+    /// Guile Scheme.
     Guile,
+    /// Phel.
     Phel,
+    /// Fennel.
     Fennel,
+    /// LFE (Lisp Flavoured Erlang).
     Lfe,
+    /// ISLisp.
     Islisp,
 }
 

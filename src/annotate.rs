@@ -1,6 +1,6 @@
 //! Definition-form annotation (ADR-0019).
 //!
-//! A best-effort utility layer *over* the reader's [`Datum`](crate::Datum) tree —
+//! A best-effort utility layer *over* the reader's [`Datum`] tree —
 //! not part of the reader-only core (ADR-0001). It recognizes definition forms
 //! (`defun`, `defmacro`, `cl-defun`, `define-minor-mode`, project-local
 //! def-macros, …) and tags their parts with [`Role`]s (name, arglist, docstring,
@@ -71,6 +71,7 @@ pub struct FormSpec {
     pub docstring: bool,
     /// Whether the remaining arguments are body forms.
     pub body: bool,
+    /// How confidently this spec was determined.
     pub confidence: Confidence,
 }
 
@@ -99,6 +100,7 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// An empty registry.
     pub fn new() -> Self {
         Registry::default()
     }
@@ -108,14 +110,17 @@ impl Registry {
         self.specs.insert(spec.head.clone(), spec);
     }
 
+    /// The spec registered for `head`, if any.
     pub fn get(&self, head: &str) -> Option<&FormSpec> {
         self.specs.get(head)
     }
 
+    /// The number of registered specs.
     pub fn len(&self) -> usize {
         self.specs.len()
     }
 
+    /// Whether the registry has no specs.
     pub fn is_empty(&self) -> bool {
         self.specs.is_empty()
     }
@@ -124,7 +129,9 @@ impl Registry {
 /// One role-tagged child of an annotated form.
 #[derive(Debug)]
 pub struct Part<'a, 't> {
+    /// The role this child plays in the definition form.
     pub role: Role,
+    /// The child datum.
     pub datum: &'a Datum<'t>,
 }
 

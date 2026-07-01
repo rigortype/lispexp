@@ -23,6 +23,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    /// Create a lexer over `src` configured by `opts`.
     pub fn new(src: &'a str, opts: &'a Options) -> Self {
         Lexer { src, opts, pos: 0 }
     }
