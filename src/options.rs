@@ -119,6 +119,8 @@ pub enum Dialect {
     /// non-conflicting reader extensions of the `.scm`-using implementations
     /// (Gauche, Mosh, Gambit). See [`Options::scheme_superset`].
     SchemeSuperset,
+    /// EDN (a data-only subset of Clojure).
+    Edn,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -525,6 +527,22 @@ impl Options {
         Options::clojure()
     }
 
+    /// EDN — a data-only preset layered on [`Options::clojure`] with the
+    /// code-only reader syntax turned off (ADR-0025): `#(` anonymous functions,
+    /// `#'` var-quote, `#?`/`#?@` reader conditionals, `#"…"` regex literals,
+    /// and `@` deref. Tagged elements (`#inst`, `#uuid`, user tags) and
+    /// namespaced maps (`#:ns{…}`) stay on, since they are valid EDN data.
+    pub fn edn() -> Self {
+        Options {
+            hash_paren: HashParen::None, // no `#(` anonymous functions
+            hash_apostrophe: None,       // no `#'` var-quote
+            reader_conditional: false,   // no `#?`/`#?@`
+            regex_literal: false,        // no `#"…"` regex
+            deref: None,                 // no `@` deref
+            ..Options::clojure()
+        }
+    }
+
     /// Fennel (a Lisp that compiles to Lua).
     pub fn fennel() -> Self {
         Options {
@@ -621,6 +639,7 @@ impl Options {
             Dialect::Lfe => Options::lfe(),
             Dialect::Islisp => Options::islisp(),
             Dialect::SchemeSuperset => Options::scheme_superset(),
+            Dialect::Edn => Options::edn(),
         }
     }
 }
