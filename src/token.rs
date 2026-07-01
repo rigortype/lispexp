@@ -18,6 +18,9 @@ pub enum TokenKind {
     Whitespace,
     LineComment,
     BlockComment,
+    /// A `#lang <name>` directive line (Racket); captured, then treated as
+    /// trivia by the reader (ADR-0012).
+    LangLine,
     /// An opening delimiter.
     Open(Delim),
     /// A closing delimiter.

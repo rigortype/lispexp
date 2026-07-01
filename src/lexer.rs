@@ -2,7 +2,8 @@
 //!
 //! Robust to incomplete input at character granularity; it never does the
 //! top-level resync that is a Reader policy (ADR-0015). Driven entirely by
-//! [`Options`] (ADR-0003); covers the Scheme, Clojure, and Common Lisp surfaces.
+//! [`Options`] (ADR-0003); covers the Scheme, Clojure, Common Lisp, Emacs Lisp,
+//! and Racket surfaces.
 
 use crate::datum::{Delim, Prefix};
 use crate::options::{CharSyntax, HashParen, Options};
@@ -237,7 +238,27 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn at_line_start(&self) -> bool {
+        self.pos == 0 || self.src[..self.pos].ends_with('\n')
+    }
+
     fn lex_hash(&mut self, start: usize) -> Token {
+        // Line-leading `#lang <name>` directive (Racket) and `#!` shebang.
+        if self.at_line_start() {
+            if self.opts.lang_line && self.rest().starts_with("#lang") {
+                while !matches!(self.peek(), Some('\n') | None) {
+                    self.bump();
+                }
+                return self.token(TokenKind::LangLine, start);
+            }
+            if self.opts.shebang_line && self.rest().starts_with("#!") {
+                while !matches!(self.peek(), Some('\n') | None) {
+                    self.bump();
+                }
+                return self.token(TokenKind::LineComment, start);
+            }
+        }
+
         // Block comment (delimiters may be `#|`..`|#`).
         if let Some(bc) = self.opts.block_comment {
             if self.rest().starts_with(bc.open) {
@@ -299,10 +320,15 @@ impl<'a> Lexer<'a> {
                 self.token(TokenKind::Open(Delim::Set), start)
             }
             Some('[') if self.opts.square.is_delimiter() => {
-                // Emacs Lisp byte-code objects `#[...]` — a hash literal over a
-                // bracketed group.
+                // Emacs Lisp byte-code objects / Racket `#[...]` vectors — a hash
+                // literal over a bracketed group.
                 self.bump();
                 self.token(TokenKind::HashOpen(Delim::Square), start)
+            }
+            Some('{') if self.opts.curly.is_delimiter() => {
+                // Racket `#{...}` vectors.
+                self.bump();
+                self.token(TokenKind::HashOpen(Delim::Curly), start)
             }
             Some('(') => match self.opts.hash_paren {
                 HashParen::Vector => {

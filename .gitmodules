@@ -13,3 +13,6 @@
 [submodule "tests/corpus/magit"]
 	path = tests/corpus/magit
 	url = https://github.com/magit/magit
+[submodule "tests/corpus/typed-racket"]
+	path = tests/corpus/typed-racket
+	url = https://github.com/racket/typed-racket

@@ -24,11 +24,19 @@ pub struct Parsed<'a> {
 
 /// Parse `source` under `options` into a datum tree. Never panics.
 pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
+    let mut lang_line: Option<&'a str> = None;
     let tokens: Vec<Token> = Lexer::new(source, options)
         .filter(|t| {
+            if t.kind == TokenKind::LangLine && lang_line.is_none() {
+                // Capture the language spec after `#lang`, verbatim (ADR-0012).
+                lang_line = Some(t.span.text(source).trim_start_matches("#lang").trim());
+            }
             !matches!(
                 t.kind,
-                TokenKind::Whitespace | TokenKind::LineComment | TokenKind::BlockComment
+                TokenKind::Whitespace
+                    | TokenKind::LineComment
+                    | TokenKind::BlockComment
+                    | TokenKind::LangLine
             )
         })
         .collect();
@@ -40,13 +48,14 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
         line_starts: line_starts(source),
         errors: Vec::new(),
         keyword_colon: options.keyword_colon,
+        hash_keyword: options.hash_keyword,
         dotted_pairs: options.dotted_pairs,
         feature_conditional: options.feature_conditional,
     };
 
     let data = parser.parse_top_level();
     Parsed {
-        lang_line: None,
+        lang_line,
         data,
         errors: parser.errors,
     }
@@ -64,6 +73,7 @@ struct Parser<'a> {
     line_starts: Vec<u32>,
     errors: Vec<ParseError>,
     keyword_colon: bool,
+    hash_keyword: bool,
     dotted_pairs: bool,
     feature_conditional: bool,
 }
@@ -149,7 +159,9 @@ impl<'a> Parser<'a> {
             TokenKind::Str => DatumKind::Str(self.text(t.span)),
             TokenKind::Char => DatumKind::Char(self.text(t.span)),
             TokenKind::Bool(b) => DatumKind::Bool(b),
-            TokenKind::Atom => classify_atom(self.text(t.span), self.keyword_colon),
+            TokenKind::Atom => {
+                classify_atom(self.text(t.span), self.keyword_colon, self.hash_keyword)
+            }
             TokenKind::HashTag => {
                 // `#tag <form>`: attach the tag to the following datum.
                 let tag = &self.text(t.span)[1..]; // drop leading '#'
@@ -260,6 +272,7 @@ impl<'a> Parser<'a> {
             TokenKind::Whitespace
             | TokenKind::LineComment
             | TokenKind::BlockComment
+            | TokenKind::LangLine
             | TokenKind::Close(_)
             | TokenKind::Error => return None,
         };
@@ -415,7 +428,10 @@ fn close_matches(open: Delim, close: Delim) -> bool {
     }
 }
 
-fn classify_atom(text: &str, keyword_colon: bool) -> DatumKind<'_> {
+fn classify_atom(text: &str, keyword_colon: bool, hash_keyword: bool) -> DatumKind<'_> {
+    if hash_keyword && text.starts_with("#:") {
+        return DatumKind::Keyword(text);
+    }
     if keyword_colon && text.starts_with(':') {
         return DatumKind::Keyword(text);
     }

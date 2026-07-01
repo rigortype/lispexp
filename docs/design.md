@@ -218,10 +218,17 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
 ## Implementation status
 
 Implemented dialects: **Scheme** (`Options::scheme`), **Clojure** (`Options::clojure`),
-**Common Lisp** (`Options::common_lisp`), and **Emacs Lisp** (`Options::emacs_lisp`).
-Each is exercised by a real-world corpus under `tests/corpus/` — chibi-scheme (610
-files), clojure/clojure (142), cl-ppcre (23), lem (627 CL files), and magit (49 elisp
-files) — all parse with zero errors.
+**Common Lisp** (`Options::common_lisp`), **Emacs Lisp** (`Options::emacs_lisp`), and
+**Racket** (`Options::racket`). Each is exercised by a real-world corpus under
+`tests/corpus/` — chibi-scheme (610 files), clojure/clojure (142), cl-ppcre (23), lem
+(627 CL files), magit (49 elisp files), and typed-racket (1872 files) — all parse with
+zero errors.
+
+Racket notes: the `#lang <name>` line is captured into `Parsed.lang_line` and not
+otherwise acted on (ADR-0012); `#:foo` keywords, `[]`/`{}` as code lists, `#'` syntax,
+and `#(`/`#[`/`#{` vectors are handled. A `#lang` that selects a non-s-expression
+reader (e.g. Scribble's at-expressions) is out of scope — such files are excluded from
+the corpus, not parsed.
 
 Clojure first-cut simplifications (structure is always correct; these concern
 retained detail):

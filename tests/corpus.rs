@@ -152,6 +152,19 @@ fn magit_corpus_parses() {
 }
 
 #[test]
+fn typed_racket_corpus_parses() {
+    check_corpus(
+        "typed-racket",
+        &["rkt"],
+        &Options::racket(),
+        1500,
+        // A Scribble document (`#lang scribble/...`): at-expressions and text
+        // mode are a different reader, not Racket s-expression syntax (ADR-0012).
+        &["typed-racket-doc/typed-racket/scribblings/utils.rkt"],
+    );
+}
+
+#[test]
 fn lem_corpus_parses() {
     check_corpus(
         "lem",

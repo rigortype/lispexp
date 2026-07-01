@@ -2,7 +2,7 @@
 //!
 //! [`Options`] is the orthogonal, individually-toggleable syntax configuration
 //! the Lexer and Reader share (ADR-0003). A [`Dialect`] is just a named preset
-//! constructor. Scheme, Clojure, Common Lisp, and Emacs Lisp are implemented.
+//! constructor. Scheme, Clojure, Common Lisp, Emacs Lisp, and Racket are done.
 
 use crate::datum::Prefix;
 
@@ -64,6 +64,7 @@ pub enum Dialect {
     Clojure,
     CommonLisp,
     EmacsLisp,
+    Racket,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -112,6 +113,12 @@ pub struct Options {
     pub hash_paren: HashParen,
     /// Whether `:foo` is a keyword.
     pub keyword_colon: bool,
+    /// Whether `#:foo` is a keyword (Racket, Guile).
+    pub hash_keyword: bool,
+    /// Whether a leading `#lang <name>` line is captured (Racket).
+    pub lang_line: bool,
+    /// Whether a leading `#!`-line is a shebang comment (Racket scripts).
+    pub shebang_line: bool,
     /// Whether `|...|` is a piped symbol.
     pub piped_symbols: bool,
     /// Whether `#n=` / `#n#` datum labels are recognized.
@@ -166,6 +173,9 @@ impl Options {
             piped_symbols: true,
             datum_labels: true,
             dotted_pairs: true,
+            hash_keyword: false,
+            lang_line: false,
+            shebang_line: false,
             quote: Some('\''),
             quasiquote: Some('`'),
             unquote: Some(','),
@@ -201,6 +211,9 @@ impl Options {
             piped_symbols: false,
             datum_labels: false,
             dotted_pairs: false,
+            hash_keyword: false,
+            lang_line: false,
+            shebang_line: false,
             quote: Some('\''),
             quasiquote: Some('`'),
             unquote: Some('~'),
@@ -241,6 +254,9 @@ impl Options {
             piped_symbols: true,           // |foo bar|
             datum_labels: true,            // #n= / #n#
             dotted_pairs: true,
+            hash_keyword: false,
+            lang_line: false,
+            shebang_line: false,
             quote: Some('\''),
             quasiquote: Some('`'),
             unquote: Some(','),
@@ -276,12 +292,31 @@ impl Options {
             piped_symbols: false,
             datum_labels: true, // #1= / #1# circular structure
             dotted_pairs: true,
+            hash_keyword: false,
+            lang_line: false,
+            shebang_line: false,
             quote: Some('\''),
             quasiquote: Some('`'),
             unquote: Some(','),
             splicing_suffix: '@',
             deref: None,
             meta: None,
+        }
+    }
+
+    /// Racket. Layers on the Scheme surface with `#lang`, `#:` keywords, `[]`/`{}`
+    /// as code lists, `#'` syntax, and `#[`/`#{` vectors.
+    pub fn racket() -> Self {
+        Options {
+            square: DelimRole::List,
+            curly: DelimRole::List, // `[]` and `{}` are interchangeable with `()`
+            hash_apostrophe: Some(Prefix::VarQuote), // #'syntax
+            symbol_escape: true,
+            keyword_colon: false, // Racket keywords are `#:foo`, not `:foo`
+            hash_keyword: true,
+            lang_line: true,
+            shebang_line: true,
+            ..Options::scheme()
         }
     }
 
@@ -292,6 +327,7 @@ impl Options {
             Dialect::Clojure => Options::clojure(),
             Dialect::CommonLisp => Options::common_lisp(),
             Dialect::EmacsLisp => Options::emacs_lisp(),
+            Dialect::Racket => Options::racket(),
         }
     }
 }
