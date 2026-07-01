@@ -2,7 +2,7 @@
 //!
 //! [`Options`] is the orthogonal, individually-toggleable syntax configuration
 //! the Lexer and Reader share (ADR-0003). A [`Dialect`] is just a named preset
-//! constructor. Scheme, Clojure, and Common Lisp are implemented so far.
+//! constructor. Scheme, Clojure, Common Lisp, and Emacs Lisp are implemented.
 
 use crate::datum::Prefix;
 
@@ -42,6 +42,8 @@ pub enum CharSyntax {
     HashBackslash,
     /// `\a`, `\newline` (Clojure).
     Backslash,
+    /// `?a`, `?\n`, `?\C-x` (Emacs Lisp).
+    Question,
 }
 
 /// What `#(` means in a dialect.
@@ -61,6 +63,7 @@ pub enum Dialect {
     Scheme,
     Clojure,
     CommonLisp,
+    EmacsLisp,
 }
 
 /// Reader/lexer configuration. Construct via a preset such as
@@ -247,12 +250,48 @@ impl Options {
         }
     }
 
+    /// Emacs Lisp.
+    pub fn emacs_lisp() -> Self {
+        Options {
+            line_comment: ';',
+            comma_is_whitespace: false,
+            block_comment: None, // `;` line comments only
+            datum_comment: false,
+            discard_underscore: false,
+            hash_syntax: true,
+            square: DelimRole::Vector, // `[...]` is a data vector
+            curly: DelimRole::Ordinary,
+            set_literal: false,
+            regex_literal: false,
+            tagged_literals: false,
+            hash_apostrophe: Some(Prefix::FunctionQuote), // #'fn
+            reader_conditional: false,
+            feature_conditional: false,
+            read_eval: false,
+            symbol_escape: true,
+            booleans: false,                         // t / nil are ordinary symbols
+            char_syntax: Some(CharSyntax::Question), // ?a, ?\n, ?\C-x
+            hash_paren: HashParen::Vector,           // #("propertized" ...) string
+            keyword_colon: true,                     // :keyword
+            piped_symbols: false,
+            datum_labels: true, // #1= / #1# circular structure
+            dotted_pairs: true,
+            quote: Some('\''),
+            quasiquote: Some('`'),
+            unquote: Some(','),
+            splicing_suffix: '@',
+            deref: None,
+            meta: None,
+        }
+    }
+
     /// Options for a named [`Dialect`].
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
             Dialect::Scheme => Options::scheme(),
             Dialect::Clojure => Options::clojure(),
             Dialect::CommonLisp => Options::common_lisp(),
+            Dialect::EmacsLisp => Options::emacs_lisp(),
         }
     }
 }

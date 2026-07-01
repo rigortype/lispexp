@@ -131,6 +131,11 @@ impl<'a> Lexer<'a> {
             return Some(self.lex_char(start));
         }
 
+        // Character literal with a `?` lead (Emacs Lisp `?a`, `?\C-x`).
+        if c == '?' && self.opts.char_syntax == Some(CharSyntax::Question) {
+            return Some(self.lex_question_char(start));
+        }
+
         // Prefix glyphs (quote family, deref, meta).
         if let Some(kind) = self.try_prefix() {
             return Some(self.token(kind, start));
@@ -293,6 +298,12 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::Open(Delim::Set), start)
             }
+            Some('[') if self.opts.square.is_delimiter() => {
+                // Emacs Lisp byte-code objects `#[...]` — a hash literal over a
+                // bracketed group.
+                self.bump();
+                self.token(TokenKind::HashOpen(Delim::Square), start)
+            }
             Some('(') => match self.opts.hash_paren {
                 HashParen::Vector => {
                     self.bump();
@@ -413,6 +424,32 @@ impl<'a> Lexer<'a> {
                     self.bump();
                 }
             }
+        }
+        self.token(TokenKind::Char, start)
+    }
+
+    /// Lex an Emacs Lisp `?`-style character literal: `?a`, `?(`, `?\n`,
+    /// `?\C-x`, `?\^I`, `?\x41`. `?` followed by any single char is that char;
+    /// after `?\` a modifier/named/hex/octal run may follow.
+    fn lex_question_char(&mut self, start: usize) -> Token {
+        self.bump(); // '?'
+        match self.peek() {
+            Some('\\') => {
+                self.bump(); // '\'
+                if let Some(c) = self.bump() {
+                    // Modifier (C-, M-, ^), named, hex, or octal escapes.
+                    if c.is_alphanumeric() || c == '-' || c == '^' {
+                        while matches!(self.peek(), Some(c) if c.is_alphanumeric() || c == '-' || c == '^')
+                        {
+                            self.bump();
+                        }
+                    }
+                }
+            }
+            Some(_) => {
+                self.bump(); // a single literal char, e.g. ?( ?; ?)
+            }
+            None => {}
         }
         self.token(TokenKind::Char, start)
     }

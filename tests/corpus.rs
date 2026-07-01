@@ -147,6 +147,11 @@ fn cl_ppcre_corpus_parses() {
 }
 
 #[test]
+fn magit_corpus_parses() {
+    check_corpus("magit", &["el"], &Options::emacs_lisp(), 40, &[]);
+}
+
+#[test]
 fn lem_corpus_parses() {
     check_corpus(
         "lem",

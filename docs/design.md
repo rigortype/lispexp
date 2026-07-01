@@ -218,9 +218,10 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
 ## Implementation status
 
 Implemented dialects: **Scheme** (`Options::scheme`), **Clojure** (`Options::clojure`),
-and **Common Lisp** (`Options::common_lisp`). Each is exercised by a real-world
-corpus under `tests/corpus/` — chibi-scheme (610 files), clojure/clojure (142),
-cl-ppcre (23), and lem (627 CL files) — all parse with zero errors.
+**Common Lisp** (`Options::common_lisp`), and **Emacs Lisp** (`Options::emacs_lisp`).
+Each is exercised by a real-world corpus under `tests/corpus/` — chibi-scheme (610
+files), clojure/clojure (142), cl-ppcre (23), lem (627 CL files), and magit (49 elisp
+files) — all parse with zero errors.
 
 Clojure first-cut simplifications (structure is always correct; these concern
 retained detail):

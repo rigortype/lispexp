@@ -10,3 +10,6 @@
 [submodule "tests/corpus/lem"]
 	path = tests/corpus/lem
 	url = https://github.com/lem-project/lem
+[submodule "tests/corpus/magit"]
+	path = tests/corpus/magit
+	url = https://github.com/magit/magit
