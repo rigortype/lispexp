@@ -71,7 +71,40 @@ pub enum Notation { Shorthand, Longhand }
 pub struct ParseError { pub span: Span, pub line: u32, pub message: String }
 ```
 
-## API shape
+## Layered API: Lexer (Layer 1) + Reader (Layer 2)  (ADR-0015)
+
+Two public layers over the same `Options`. `cccc` consumes the Reader; a parinfer
+backend consumes the Lexer.
+
+- **Lexer** — turns source into a linear `Token` stream that *tiles* the input
+  (every byte belongs to exactly one token, whitespace included), robust to
+  incomplete/unbalanced input at character granularity. It surfaces strings and
+  comments as spans (which the tree omits, ADR-0010) and reports escape state, so a
+  consumer can match parens, track indentation, and never miscount a delimiter
+  inside `#\(`, `"\)"`, a comment, or a long string.
+- **Reader** — builds the `Parsed` datum tree on top of the Lexer.
+
+```rust
+pub struct Token { pub kind: TokenKind, pub span: Span }
+
+pub enum TokenKind {
+    OpenDelim(Delim), CloseDelim(Delim),   // carries which delimiter, for matching
+    Atom,                                   // symbol/number/keyword/bool (coarse; Reader refines)
+    Str, Char,
+    LineComment, BlockComment,              // surfaced here, unlike the tree
+    ReaderMarker,                           // '  `  ~  #  #_  #;  #'  etc. — a prefix/hash lead
+    Whitespace,
+}
+
+pub fn lex<'a>(source: &'a str, options: &Options) -> impl Iterator<Item = Token>;
+```
+
+The Lexer lexes linearly and never performs the top-level resync that is a *parser*
+policy (ADR-0004); unclosed strings/comments/parens are reported as such, not recovered.
+**Non-goal:** sexpp provides the lexical analysis, not the parinfer paren-inference
+algorithm — that stays in the consumer.
+
+## Reader API shape
 
 Whole-string, borrowed, one call (ADR-0008). No `io::Read`-streaming variant in v1 —
 it fights the zero-copy borrow, and `cccc` reads whole files.
@@ -121,12 +154,14 @@ Orthogonal settings that presets configure (from the dialect survey):
   (Fennel `:foo`) (ADR-0006). LFE: colon is an ordinary symbol constituent (no keyword).
 - **Block comment**: `(open, close, nestable)` triple (ADR-0007) —
   `("#|","|#",true)` for Scheme/CL/ISLisp/Racket, `("#|","|#",false)` for LFE,
-  `(";|","|;",_)` for AutoLISP, none for Emacs Lisp/Fennel.
+  `(";|","|;",_)` for AutoLISP, `("#!","!#",_)` for Guile, none for Emacs Lisp/Fennel.
+  (Guile's `#!…!#` and Hy's `#!` shebang share a lead but differ by dialect config.)
 - **String/char syntax**: R6RS/R7RS vs Elisp vs Clojure `\newline`; presence of char
   literals at all (AutoLISP has none). Raw slices retained regardless.
-- **Bracket strings** (ADR-0014): Hy's `#[[...]]` / `#[DELIM[...]DELIM]` balanced,
-  custom-delimiter strings — an Options-gated string-lexer feature emitting `Str`.
-  Python-style string prefixes (`r"" b"" f""`) are kept as part of the raw `Str` slice.
+- **Bracket / long strings** (ADR-0014): Hy's `#[[...]]` / `#[DELIM[...]DELIM]` and
+  Janet's backtick long strings — the same balanced, custom-delimiter mechanism, an
+  Options-gated string-lexer feature emitting `Str`. Python-style string prefixes
+  (`r"" b"" f""`) are kept as part of the raw `Str` slice.
 - **Comma handling**: whitespace (Clojure/Phel), or ordinary/insignificant and usable
   as a numeric digit separator (Hy), or plain insignificant (everyone else).
 - **Number vs symbol boundary**: a dialect-configured predicate. Value is never parsed;

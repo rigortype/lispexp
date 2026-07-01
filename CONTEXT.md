@@ -24,8 +24,12 @@ A dialect-specific leading directive (e.g. Racket's `#lang racket`) that is not 
 _Avoid_: shebang (similar shape, but a lang line changes reader configuration, not just execution)
 
 **Reader**:
-The sexpp component that lexes and parses source text into a tree of Datums. Deliberately excludes evaluation, macro-expansion, and the numeric tower.
+The upper of sexpp's two layers: builds a tree of Datums on top of the Lexer. Deliberately excludes evaluation, macro-expansion, and the numeric tower.
 _Avoid_: interpreter, evaluator
+
+**Lexer**:
+The lower of sexpp's two layers: turns source into a linear token stream that tiles the input, surfacing delimiters, atoms, strings, comments, and reader markers as spans. Independently consumable — a parinfer-style tool uses the Lexer without the Reader's Datum tree. Shares the same Options as the Reader.
+_Avoid_: tokenizer (acceptable synonym, but "Lexer" is the canonical term here), scanner
 
 **Reader macro**:
 Reading-time syntax that tags a following Datum rather than transforming source code — e.g. quote (`'x`), quasiquote, unquote, unquote-splicing, or discard (`#_`, `#;`). Represented in the tree as a `Prefixed` datum.
