@@ -6,7 +6,7 @@
 //! and Racket surfaces.
 
 use crate::datum::{Delim, Prefix};
-use crate::options::{CharSyntax, HashParen, Options};
+use crate::options::{CharSyntax, HashBracket, HashParen, Options};
 use crate::span::Span;
 use crate::token::{Token, TokenKind};
 
@@ -332,15 +332,8 @@ impl<'a> Lexer<'a> {
     /// pattern ends at the first unescaped `/` without tracking `[...]` classes.
     fn lex_regex_slash(&mut self, start: usize) -> Token {
         self.bump(); // '/'
-        loop {
-            match self.bump() {
-                Some('/') => break,
-                Some('\\') => {
-                    self.bump(); // escaped char (e.g. `\/`)
-                }
-                Some(_) => {}
-                None => return self.token(TokenKind::Error, start), // unterminated
-            }
+        if !self.consume_until_unescaped('/') {
+            return self.token(TokenKind::Error, start); // unterminated
         }
         if self.peek() == Some('i') {
             self.bump(); // the sole case-fold flag
@@ -350,19 +343,21 @@ impl<'a> Lexer<'a> {
 
     fn lex_string(&mut self, start: usize) -> Token {
         self.bump(); // opening quote
-        if self.consume_string_body() {
+        if self.consume_until_unescaped('"') {
             self.token(TokenKind::Str, start)
         } else {
             self.token(TokenKind::Error, start) // unterminated
         }
     }
 
-    /// Consume a `"..."` body from just after the opening quote. Returns whether
-    /// the string was terminated.
-    fn consume_string_body(&mut self) -> bool {
+    /// Consume characters up to and including the next unescaped `close`, from
+    /// just after the opener. `\` escapes the following byte (so `\close` does
+    /// not terminate). Returns whether `close` was found before EOF. Shared by
+    /// strings (`"`), piped symbols (`|`), and regexp literals (`/`).
+    fn consume_until_unescaped(&mut self, close: char) -> bool {
         loop {
             match self.bump() {
-                Some('"') => return true,
+                Some(c) if c == close => return true,
                 Some('\\') => {
                     self.bump(); // escaped char
                 }
@@ -374,15 +369,10 @@ impl<'a> Lexer<'a> {
 
     fn lex_piped_symbol(&mut self, start: usize) -> Token {
         self.bump(); // opening bar
-        loop {
-            match self.bump() {
-                Some('|') => return self.token(TokenKind::Atom, start),
-                Some('\\') => {
-                    self.bump();
-                }
-                Some(_) => {}
-                None => return self.token(TokenKind::Error, start), // unterminated
-            }
+        if self.consume_until_unescaped('|') {
+            self.token(TokenKind::Atom, start)
+        } else {
+            self.token(TokenKind::Error, start) // unterminated
         }
     }
 
@@ -450,7 +440,7 @@ impl<'a> Lexer<'a> {
             }
             Some('"') if self.opts.regex_literal => {
                 self.bump(); // opening quote
-                if self.consume_string_body() {
+                if self.consume_until_unescaped('"') {
                     self.token(TokenKind::Str, start) // regex as a string leaf
                 } else {
                     self.token(TokenKind::Error, start)
@@ -460,12 +450,14 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::Open(Delim::Set), start)
             }
-            Some('[') if self.opts.char_set_literal => {
+            Some('[') if self.opts.hash_bracket == HashBracket::CharSet => {
                 // Gauche char-set literal `#[...]` — opaque up to the matching
-                // `]` (respecting `\]`); may hold raw `(`/`[`/`/` bytes. Must
-                // precede the `#[`-hash-vector arm below, which would otherwise
-                // try to read the payload as a bracketed group.
+                // `]` (respecting `\]`); may hold raw `(`/`[`/`/` bytes.
                 self.lex_char_set(start)
+            }
+            Some('[') if self.opts.hash_bracket == HashBracket::BracketString => {
+                // Hy bracket string `#[[...]]` / `#[DELIM[...]DELIM]`.
+                self.lex_bracket_string(start)
             }
             Some('/') if self.opts.regex_slash => {
                 // Gauche/Mosh regexp literal `#/.../` with optional trailing
@@ -478,10 +470,6 @@ impl<'a> Lexer<'a> {
                     self.bump();
                 }
                 self.token(TokenKind::HashOpen(Delim::Round), start)
-            }
-            Some('[') if self.opts.bracket_string => {
-                // Hy bracket string `#[[...]]` / `#[DELIM[...]DELIM]`.
-                self.lex_bracket_string(start)
             }
             Some('[') if self.opts.square.is_delimiter() => {
                 // Emacs Lisp byte-code objects / Racket `#[...]` vectors — a hash

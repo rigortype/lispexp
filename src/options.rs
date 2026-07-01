@@ -66,6 +66,22 @@ pub enum HashParen {
     None,
 }
 
+/// What `#[` opens in a dialect. The single `#[` dispatch has several
+/// mutually-exclusive meanings across dialects; this enum makes the choice
+/// explicit (like [`HashParen`] for `#(`) instead of leaving it to the implicit
+/// order of competing flags. Distinct from the bare-`[` delimiter role
+/// ([`Options::square`]), which still applies when this is [`HashBracket::None`]
+/// (e.g. Racket/Emacs `#[...]` hash-vectors).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashBracket {
+    /// `#[...]` is a Gauche character-set literal, consumed as an opaque leaf.
+    CharSet,
+    /// `#[DELIM[...]DELIM]` is a Hy bracket string.
+    BracketString,
+    /// `#[` has no dedicated meaning; falls back to the [`Options::square`] role.
+    None,
+}
+
 /// A named dialect. Presets are constructed via [`Options`].
 ///
 /// `#[non_exhaustive]`: new dialects are added over time, so downstream `match`es
@@ -132,7 +148,10 @@ pub struct Options {
     pub curly: DelimRole,
     /// Whether `#{` opens a set literal.
     pub set_literal: bool,
-    /// Whether `#"..."` is a regex literal (lexed as a string leaf).
+    /// Whether `#"..."` is lexed as an opaque string leaf. The payload's
+    /// *meaning* is per-dialect — a Clojure/LFE regex, a Gauche interpolated
+    /// string — but the reader records only the shape (a `#`-tagged string),
+    /// leaving interpretation to the consumer.
     pub regex_literal: bool,
     /// Whether `#tag <form>` is a tagged literal (Clojure `#inst`, `#uuid`, ...).
     pub tagged_literals: bool,
@@ -189,12 +208,10 @@ pub struct Options {
     pub short_fn: Option<char>,
     /// Whether a run of backticks delimits a long string (Janet).
     pub long_string_backtick: bool,
-    /// Whether `#[DELIM[...]DELIM]` is a bracket string (Hy).
-    pub bracket_string: bool,
-    /// Whether `#[...]` is a character-set literal (Gauche), consumed as an
-    /// opaque leaf up to the matching `]` (respecting `\]`). Takes precedence
-    /// over the `#[` hash-vector reading of an active `[` delimiter.
-    pub char_set_literal: bool,
+    /// What `#[` opens: a Gauche char-set, a Hy bracket string, or nothing
+    /// (falling back to the [`Self::square`] role). One choice instead of
+    /// competing per-meaning flags.
+    pub hash_bracket: HashBracket,
     /// Whether `#/.../` (with optional trailing flag letters) is a regexp
     /// literal (Gauche, Mosh), consumed as an opaque leaf up to the next
     /// unescaped `/`.
@@ -254,8 +271,7 @@ impl Options {
             mutable: None,
             short_fn: None,
             long_string_backtick: false,
-            bracket_string: false,
-            char_set_literal: false,
+            hash_bracket: HashBracket::None,
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
@@ -301,8 +317,7 @@ impl Options {
             mutable: None,
             short_fn: None,
             long_string_backtick: false,
-            bracket_string: false,
-            char_set_literal: false,
+            hash_bracket: HashBracket::None,
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
@@ -353,8 +368,7 @@ impl Options {
             mutable: None,
             short_fn: None,
             long_string_backtick: false,
-            bracket_string: false,
-            char_set_literal: false,
+            hash_bracket: HashBracket::None,
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
@@ -400,8 +414,7 @@ impl Options {
             mutable: None,
             short_fn: None,
             long_string_backtick: false,
-            bracket_string: false,
-            char_set_literal: false,
+            hash_bracket: HashBracket::None,
             regex_slash: false,
             bytevector_vu8: false,
             keyword_trailing_colon: false,
@@ -466,9 +479,9 @@ impl Options {
             keyword_colon: true,
             piped_symbols: false,
             datum_labels: false,
-            dotted_pairs: false,  // `.` is attribute access
-            unquote: Some('~'),   // Clojure-style unquote
-            bracket_string: true, // #[[...]] / #[DELIM[...]DELIM]
+            dotted_pairs: false,                      // `.` is attribute access
+            unquote: Some('~'),                       // Clojure-style unquote
+            hash_bracket: HashBracket::BracketString, // #[[...]] / #[DELIM[...]DELIM]
             ..Options::scheme()
         }
     }
@@ -581,12 +594,12 @@ impl Options {
     /// `{}`→`(@method …)` conventions are out of scope; `{` `}` stay ordinary.
     pub fn scheme_superset() -> Self {
         Options {
-            char_set_literal: true,       // Gauche  #[...]
-            regex_slash: true,            // Gauche/Mosh  #/.../
-            regex_literal: true,          // Gauche  #"..." interpolated string (Str leaf)
-            bytevector_vu8: true,         // Mosh/R6RS  #vu8(...)
-            keyword_colon: true,          // Gauche/Guile  :foo
-            keyword_trailing_colon: true, // Gambit/Gerbil  foo:
+            hash_bracket: HashBracket::CharSet, // Gauche  #[...]
+            regex_slash: true,                  // Gauche/Mosh  #/.../
+            regex_literal: true,                // Gauche  #"..." interpolated string (Str leaf)
+            bytevector_vu8: true,               // Mosh/R6RS  #vu8(...)
+            keyword_colon: true,                // Gauche/Guile  :foo
+            keyword_trailing_colon: true,       // Gambit/Gerbil  foo:
             ..Options::scheme()
         }
     }

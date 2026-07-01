@@ -36,7 +36,7 @@ mod token;
 pub use datum::{Datum, DatumKind, Delim, Notation, Prefix};
 pub use error::ParseError;
 pub use lexer::{lex, Lexer};
-pub use options::{BlockComment, CharSyntax, DelimRole, Dialect, HashParen, Options};
+pub use options::{BlockComment, CharSyntax, DelimRole, Dialect, HashBracket, HashParen, Options};
 pub use reader::{parse, read_all, Parsed};
 pub use span::Span;
 pub use token::{Token, TokenKind};

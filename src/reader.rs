@@ -47,11 +47,7 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
         pos: 0,
         line_starts: line_starts(source),
         errors: Vec::new(),
-        keyword_colon: options.keyword_colon,
-        hash_keyword: options.hash_keyword,
-        keyword_trailing_colon: options.keyword_trailing_colon,
-        dotted_pairs: options.dotted_pairs,
-        feature_conditional: options.feature_conditional,
+        opts: options,
     };
 
     let data = parser.parse_top_level();
@@ -67,20 +63,18 @@ pub fn read_all<'a>(source: &'a str, options: &Options) -> std::vec::IntoIter<Da
     parse(source, options).data.into_iter()
 }
 
-struct Parser<'a> {
+struct Parser<'a, 'o> {
     source: &'a str,
     tokens: Vec<Token>,
     pos: usize,
     line_starts: Vec<u32>,
     errors: Vec<ParseError>,
-    keyword_colon: bool,
-    hash_keyword: bool,
-    keyword_trailing_colon: bool,
-    dotted_pairs: bool,
-    feature_conditional: bool,
+    /// Borrowed only for the duration of parsing (a separate lifetime from the
+    /// source `'a`, so a caller's temporary `&Options` stays ergonomic).
+    opts: &'o Options,
 }
 
-impl<'a> Parser<'a> {
+impl<'a> Parser<'a, '_> {
     fn peek(&self) -> Option<Token> {
         self.tokens.get(self.pos).copied()
     }
@@ -161,12 +155,7 @@ impl<'a> Parser<'a> {
             TokenKind::Str => DatumKind::Str(self.text(t.span)),
             TokenKind::Char => DatumKind::Char(self.text(t.span)),
             TokenKind::Bool(b) => DatumKind::Bool(b),
-            TokenKind::Atom => classify_atom(
-                self.text(t.span),
-                self.keyword_colon,
-                self.hash_keyword,
-                self.keyword_trailing_colon,
-            ),
+            TokenKind::Atom => classify_atom(self.text(t.span), self.opts),
             TokenKind::HashTag => {
                 // `#tag <form>`: attach the tag to the following datum.
                 let tag = &self.text(t.span)[1..]; // drop leading '#'
@@ -184,7 +173,9 @@ impl<'a> Parser<'a> {
                     line,
                 });
             }
-            TokenKind::Prefix(Prefix::ReaderConditional(sense)) if self.feature_conditional => {
+            TokenKind::Prefix(Prefix::ReaderConditional(sense))
+                if self.opts.feature_conditional =>
+            {
                 // Common Lisp `#+feature form` / `#-feature form`: read the
                 // feature test, then the guarded form. First cut: the feature
                 // test is consumed but not retained; the guarded form is kept so
@@ -313,7 +304,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 TokenKind::Atom
-                    if self.dotted_pairs
+                    if self.opts.dotted_pairs
                         && tail.is_none()
                         && !items.is_empty()
                         && self.text(t.span) == "." =>
@@ -433,16 +424,11 @@ fn close_matches(open: Delim, close: Delim) -> bool {
     }
 }
 
-fn classify_atom(
-    text: &str,
-    keyword_colon: bool,
-    hash_keyword: bool,
-    keyword_trailing_colon: bool,
-) -> DatumKind<'_> {
-    if hash_keyword && text.starts_with("#:") {
+fn classify_atom<'a>(text: &'a str, opts: &Options) -> DatumKind<'a> {
+    if opts.hash_keyword && text.starts_with("#:") {
         return DatumKind::Keyword(text);
     }
-    if keyword_colon && text.starts_with(':') {
+    if opts.keyword_colon && text.starts_with(':') {
         return DatumKind::Keyword(text);
     }
     if looks_like_number(text) {
@@ -452,7 +438,7 @@ fn classify_atom(
     // *identifier* followed by `:`. Checked after `looks_like_number` so a
     // numeric-looking atom (`1:`, `#xFF:`) stays a Number as under strict R7RS;
     // a bare `:` is an ordinary symbol, so require a char before the colon.
-    if keyword_trailing_colon && text.len() > 1 && text.ends_with(':') {
+    if opts.keyword_trailing_colon && text.len() > 1 && text.ends_with(':') {
         return DatumKind::Keyword(text);
     }
     DatumKind::Symbol(text)

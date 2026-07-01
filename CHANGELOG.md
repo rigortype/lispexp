@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   a preset (e.g. `Options::scheme()`) and adjust fields via `..`, and add a
   wildcard arm when matching on `Dialect`. (Breaking for downstream crates that
   built `Options`/matched `Dialect` exhaustively; warrants a 0.2.0 release.)
+- `#[` dispatch is now a single `Options::hash_bracket: HashBracket`
+  (`CharSet` / `BracketString` / `None`) instead of the separate `bracket_string`
+  flag, making the competing `#[` meanings mutually exclusive by type.
 
 ## [0.1.1] - 2026-07-02
 
