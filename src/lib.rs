@@ -14,6 +14,7 @@
 //! The first implemented dialect is Scheme ([`Options::scheme`]).
 #![forbid(unsafe_code)]
 
+pub mod annotate;
 mod datum;
 mod error;
 mod lexer;

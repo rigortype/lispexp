@@ -215,6 +215,17 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
   kept as a single `Symbol` rather than expanded to `(. foo bar)`; `#!` shebang is
   skipped as a leading line.
 
+## Definition-form annotator (ADR-0019)
+
+Implemented as the `sexpp::annotate` module — a best-effort utility layer over the
+`Datum` tree (not part of the reader core). A `Registry` of `FormSpec`s (from
+`emacs_lisp_builtins()` plus `harvest_source()`, which reads a def-macro's own
+arglist parameter names and `declare` metadata) drives `annotate_form` /
+`annotate_tree`, tagging a definition form's children with `Role`s (Name, Arglist,
+Docstring, Declare, Interactive, Body). Validated on `~/.emacs.d/elpa`: 529 specs
+harvested from third-party def-macros, 11,754 definition forms annotated across
+400 files. Never expands or evaluates macros.
+
 ## Implementation status
 
 Implemented dialects: **Scheme** (`Options::scheme`), **Clojure** (`Options::clojure`),
