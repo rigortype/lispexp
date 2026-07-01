@@ -1,11 +1,11 @@
 //! The Lexer (Layer 1): source → linear token stream that tiles the input.
 //!
 //! Robust to incomplete input at character granularity; it never does the
-//! top-level resync that is a Reader policy (ADR-0015). So far it covers the
-//! Scheme lexical surface, driven by [`Options`].
+//! top-level resync that is a Reader policy (ADR-0015). Driven entirely by
+//! [`Options`] (ADR-0003); covers the Scheme and Clojure lexical surfaces.
 
 use crate::datum::{Delim, Prefix};
-use crate::options::Options;
+use crate::options::{CharSyntax, HashParen, Options};
 use crate::span::Span;
 use crate::token::{Token, TokenKind};
 
@@ -48,9 +48,13 @@ impl<'a> Lexer<'a> {
         self.opts.curly.is_delimiter()
     }
 
+    fn is_whitespace(&self, c: char) -> bool {
+        c.is_whitespace() || (self.opts.comma_is_whitespace && c == ',')
+    }
+
     /// Does `c` end an atom / not belong to a symbol?
     fn is_terminator(&self, c: char) -> bool {
-        c.is_whitespace()
+        self.is_whitespace(c)
             || c == '('
             || c == ')'
             || c == '"'
@@ -70,9 +74,9 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         let c = self.peek()?;
 
-        // Whitespace run.
-        if c.is_whitespace() {
-            while matches!(self.peek(), Some(c) if c.is_whitespace()) {
+        // Whitespace run (commas included where configured).
+        if self.is_whitespace(c) {
+            while matches!(self.peek(), Some(c) if self.is_whitespace(c)) {
                 self.bump();
             }
             return Some(self.token(TokenKind::Whitespace, start));
@@ -122,23 +126,23 @@ impl<'a> Lexer<'a> {
             return Some(self.lex_hash(start));
         }
 
-        // Quote family (per-dialect glyphs).
-        if let Some(kind) = self.try_quote_prefix() {
+        // Character literal with a bare backslash lead (Clojure `\a`).
+        if c == '\\' && self.opts.char_syntax == Some(CharSyntax::Backslash) {
+            return Some(self.lex_char(start));
+        }
+
+        // Prefix glyphs (quote family, deref, meta).
+        if let Some(kind) = self.try_prefix() {
             return Some(self.token(kind, start));
         }
 
-        // Otherwise, an atom (symbol or number).
+        // Otherwise, an atom (symbol, number, or keyword).
         self.bump();
-        while let Some(c) = self.peek() {
-            if self.is_terminator(c) {
-                break;
-            }
-            self.bump();
-        }
+        self.consume_atom_body();
         Some(self.token(TokenKind::Atom, start))
     }
 
-    fn try_quote_prefix(&mut self) -> Option<TokenKind> {
+    fn try_prefix(&mut self) -> Option<TokenKind> {
         let c = self.peek()?;
         if Some(c) == self.opts.quote {
             self.bump();
@@ -156,19 +160,37 @@ impl<'a> Lexer<'a> {
             }
             return Some(TokenKind::Prefix(Prefix::Unquote));
         }
+        if Some(c) == self.opts.deref {
+            self.bump();
+            return Some(TokenKind::Prefix(Prefix::Deref));
+        }
+        if Some(c) == self.opts.meta {
+            self.bump();
+            return Some(TokenKind::Prefix(Prefix::Meta));
+        }
         None
     }
 
     fn lex_string(&mut self, start: usize) -> Token {
         self.bump(); // opening quote
+        if self.consume_string_body() {
+            self.token(TokenKind::Str, start)
+        } else {
+            self.token(TokenKind::Error, start) // unterminated
+        }
+    }
+
+    /// Consume a `"..."` body from just after the opening quote. Returns whether
+    /// the string was terminated.
+    fn consume_string_body(&mut self) -> bool {
         loop {
             match self.bump() {
-                Some('"') => return self.token(TokenKind::Str, start),
+                Some('"') => return true,
                 Some('\\') => {
                     self.bump(); // escaped char
                 }
                 Some(_) => {}
-                None => return self.token(TokenKind::Error, start), // unterminated
+                None => return false, // unterminated
             }
         }
     }
@@ -201,12 +223,61 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::Prefix(Prefix::Discard), start)
             }
-            Some('\\') if self.opts.char_literal => self.lex_char(start),
-            Some('(') => {
+            Some('_') if self.opts.discard_underscore => {
                 self.bump();
-                self.token(TokenKind::HashOpen(Delim::Round), start)
+                self.token(TokenKind::Prefix(Prefix::Discard), start)
             }
-            Some('u') if self.rest().starts_with("u8(") => {
+            Some('\'') if self.opts.var_quote => {
+                self.bump();
+                self.token(TokenKind::Prefix(Prefix::VarQuote), start)
+            }
+            Some('^') if self.opts.meta.is_some() => {
+                self.bump();
+                self.token(TokenKind::Prefix(Prefix::Meta), start)
+            }
+            Some('?') if self.opts.reader_conditional => {
+                self.bump();
+                let splicing = self.peek() == Some('@');
+                if splicing {
+                    self.bump();
+                }
+                self.token(
+                    TokenKind::Prefix(Prefix::ReaderConditional(splicing)),
+                    start,
+                )
+            }
+            Some('"') if self.opts.regex_literal => {
+                self.bump(); // opening quote
+                if self.consume_string_body() {
+                    self.token(TokenKind::Str, start) // regex as a string leaf
+                } else {
+                    self.token(TokenKind::Error, start)
+                }
+            }
+            Some('{') if self.opts.set_literal => {
+                self.bump();
+                self.token(TokenKind::Open(Delim::Set), start)
+            }
+            Some('(') => match self.opts.hash_paren {
+                HashParen::Vector => {
+                    self.bump();
+                    self.token(TokenKind::HashOpen(Delim::Round), start)
+                }
+                HashParen::HashFn => {
+                    // Leave the `(` for the next token; wrap the list as HashFn.
+                    self.token(TokenKind::Prefix(Prefix::HashFn), start)
+                }
+                HashParen::None => {
+                    self.consume_atom_body();
+                    self.token(TokenKind::Atom, start)
+                }
+            },
+            Some('\\') if self.opts.char_syntax == Some(CharSyntax::HashBackslash) => {
+                self.lex_char(start)
+            }
+            Some('u')
+                if self.opts.hash_paren == HashParen::Vector && self.rest().starts_with("u8(") =>
+            {
                 self.bump();
                 self.bump();
                 self.bump();
@@ -230,15 +301,31 @@ impl<'a> Lexer<'a> {
                 }
                 self.token(TokenKind::Bool(false), start)
             }
-            Some(c) if is_radix(c) => {
+            Some(c) if !self.opts.tagged_literals && is_radix(c) => {
                 // Radix/exactness number, e.g. #xFF, #b1010, #e1.0.
                 self.consume_atom_body();
                 self.token(TokenKind::Atom, start)
             }
-            Some(c) if c.is_ascii_digit() && self.opts.datum_labels => self.lex_label(start),
+            Some(c)
+                if !self.opts.tagged_literals && c.is_ascii_digit() && self.opts.datum_labels =>
+            {
+                self.lex_label(start)
+            }
+            Some('#') if self.opts.tagged_literals => {
+                // Clojure symbolic value: ##Inf, ##-Inf, ##NaN — a self-contained
+                // numeric literal, not a tag applied to a following form.
+                self.bump(); // second '#'
+                self.consume_atom_body();
+                self.token(TokenKind::Atom, start)
+            }
+            Some(_) if self.opts.tagged_literals => {
+                // `#inst`, `#uuid`, `#:ns`, custom `#tag` — attach to next datum.
+                self.consume_atom_body();
+                self.token(TokenKind::HashTag, start)
+            }
             _ => {
-                // Directives (#!fold-case) and any other #tag — capture without
-                // choking (ADR-0011). Treated as an atom for now.
+                // Directives (#!fold-case) and any other #form — capture without
+                // choking (ADR-0011). Treated as an atom.
                 self.consume_atom_body();
                 self.token(TokenKind::Atom, start)
             }
@@ -252,7 +339,6 @@ impl<'a> Lexer<'a> {
         close: &str,
         nestable: bool,
     ) -> Token {
-        // consume opener
         for _ in 0..open.chars().count() {
             self.bump();
         }
@@ -280,10 +366,13 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Lex a character literal from the current position; the backslash lead has
+    /// not been consumed yet (`start` marks the token's beginning, which may be a
+    /// preceding `#`).
     fn lex_char(&mut self, start: usize) -> Token {
         self.bump(); // backslash
         if let Some(c) = self.bump() {
-            // Named char like #\space / #\newline / #\x41: keep alphanumerics.
+            // Named char like #\space / \newline / A: keep alphanumerics.
             if c.is_alphabetic() {
                 while matches!(self.peek(), Some(c) if c.is_alphanumeric()) {
                     self.bump();
@@ -306,7 +395,6 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 self.token(TokenKind::LabelRef, start)
             }
-            // Not actually a label; treat the run as an atom.
             _ => self.token(TokenKind::Atom, start),
         }
     }

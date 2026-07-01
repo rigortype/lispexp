@@ -39,6 +39,8 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
         pos: 0,
         line_starts: line_starts(source),
         errors: Vec::new(),
+        keyword_colon: options.keyword_colon,
+        dotted_pairs: options.dotted_pairs,
     };
 
     let data = parser.parse_top_level();
@@ -60,6 +62,8 @@ struct Parser<'a> {
     pos: usize,
     line_starts: Vec<u32>,
     errors: Vec<ParseError>,
+    keyword_colon: bool,
+    dotted_pairs: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -143,7 +147,48 @@ impl<'a> Parser<'a> {
             TokenKind::Str => DatumKind::Str(self.text(t.span)),
             TokenKind::Char => DatumKind::Char(self.text(t.span)),
             TokenKind::Bool(b) => DatumKind::Bool(b),
-            TokenKind::Atom => classify_atom(self.text(t.span)),
+            TokenKind::Atom => classify_atom(self.text(t.span), self.keyword_colon),
+            TokenKind::HashTag => {
+                // `#tag <form>`: attach the tag to the following datum.
+                let tag = &self.text(t.span)[1..]; // drop leading '#'
+                let inner = match self.parse_datum() {
+                    Some(d) => Some(Box::new(d)),
+                    None => {
+                        self.error(t.span, "tagged literal with no following datum");
+                        None
+                    }
+                };
+                let end = inner.as_ref().map(|d| d.span.end).unwrap_or(t.span.end);
+                return Some(Datum {
+                    kind: DatumKind::HashLiteral { tag, inner },
+                    span: Span::new(t.span.start, end),
+                    line,
+                });
+            }
+            TokenKind::Prefix(Prefix::Meta) => {
+                // `^meta target` / `#^meta target`: read the metadata form, then
+                // the target it annotates. First cut: the metadata is consumed
+                // but not retained; the target is returned wrapped (structure is
+                // correct — one form — but the metadata content is dropped).
+                let _meta = self.parse_datum();
+                let inner = match self.parse_datum() {
+                    Some(d) => d,
+                    None => {
+                        self.error(t.span, "metadata with no target datum");
+                        return None;
+                    }
+                };
+                let span = Span::new(t.span.start, inner.span.end);
+                return Some(Datum {
+                    kind: DatumKind::Prefixed {
+                        prefix: Prefix::Meta,
+                        notation: Notation::Shorthand,
+                        inner: Box::new(inner),
+                    },
+                    span,
+                    line,
+                });
+            }
             TokenKind::Prefix(prefix) => {
                 let inner = match self.parse_datum() {
                     Some(d) => d,
@@ -217,14 +262,17 @@ impl<'a> Parser<'a> {
             match t.kind {
                 TokenKind::Close(close_delim) => {
                     self.advance();
-                    if close_delim != delim {
+                    if !close_matches(delim, close_delim) {
                         self.error(t.span, "mismatched closing delimiter");
                     }
                     end = t.span.end;
                     break;
                 }
                 TokenKind::Atom
-                    if tail.is_none() && !items.is_empty() && self.text(t.span) == "." =>
+                    if self.dotted_pairs
+                        && tail.is_none()
+                        && !items.is_empty()
+                        && self.text(t.span) == "." =>
                 {
                     self.advance(); // consume the dot
                     match self.parse_datum() {
@@ -332,7 +380,19 @@ fn label_id(text: &str) -> &str {
     &text[1..text.len() - 1]
 }
 
-fn classify_atom(text: &str) -> DatumKind<'_> {
+/// Whether a close delimiter closes an open one. A set `#{ ... }` is closed by
+/// a curly `}`.
+fn close_matches(open: Delim, close: Delim) -> bool {
+    match open {
+        Delim::Set => close == Delim::Curly,
+        other => close == other,
+    }
+}
+
+fn classify_atom(text: &str, keyword_colon: bool) -> DatumKind<'_> {
+    if keyword_colon && text.starts_with(':') {
+        return DatumKind::Keyword(text);
+    }
     if looks_like_number(text) {
         DatumKind::Number(text)
     } else {
@@ -346,6 +406,10 @@ fn looks_like_number(s: &str) -> bool {
     let b = s.as_bytes();
     if b.is_empty() {
         return false;
+    }
+    // Clojure symbolic values: ##Inf, ##-Inf, ##NaN.
+    if s.starts_with("##") {
+        return true;
     }
     // Radix / exactness prefix: #x, #b, #e, ...
     if b[0] == b'#' {

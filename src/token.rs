@@ -25,6 +25,9 @@ pub enum TokenKind {
     /// A `#`-led opening such as `#(` or `#u8(`; the span covers `#`..`(` and
     /// the reader derives the tag from it.
     HashOpen(Delim),
+    /// A `#tag` tagged-literal marker (Clojure `#inst`, `#uuid`, `#:ns`, ...);
+    /// the reader attaches it to the following datum. Span covers `#`..end of tag.
+    HashTag,
     /// A string literal, including its surrounding quotes.
     Str,
     /// A character literal such as `#\a` or `#\space`.

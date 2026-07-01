@@ -1,42 +1,46 @@
-//! Corpus test: every `.scm` / `.sld` file in the chibi-scheme submodule must
-//! parse with no errors under the Scheme dialect.
+//! Corpus tests: every source file in a vendored dialect corpus must parse with
+//! no errors under that dialect.
 //!
-//! The corpus is a git submodule at `tests/corpus/chibi-scheme`. If it is not
-//! checked out (e.g. a clone without `git submodule update --init`), the test
-//! skips rather than fails, so it is safe in environments without the submodule.
+//! The corpora are git submodules under `tests/corpus/`. If one is not checked
+//! out (e.g. a clone without `git submodule update --init`), its test skips
+//! rather than fails, so it is safe in environments without the submodule.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use sexpp::{parse, Options};
 
-fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/chibi-scheme")
+fn corpus_dir(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/corpus")
+        .join(name)
 }
 
-fn collect_scheme_files(dir: &Path, out: &mut Vec<PathBuf>) {
+fn collect_files(dir: &Path, exts: &[&str], out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_scheme_files(&path, out);
-        } else if matches!(
-            path.extension().and_then(|e| e.to_str()),
-            Some("scm") | Some("sld")
-        ) {
+            collect_files(&path, exts, out);
+        } else if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| exts.contains(&e))
+        {
             out.push(path);
         }
     }
 }
 
-#[test]
-fn chibi_scheme_corpus_parses() {
-    let root = corpus_root();
-    if !root.join(".git").exists() && !root.join("lib").exists() {
+/// Parse every matching file under `root` with `opts`; assert zero parse errors.
+/// `min_files` guards against a hollow-green run (corpus missing or all skipped).
+fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize) {
+    let root = corpus_dir(name);
+    if !root.join(".git").exists() && !root.join("README.md").exists() {
         eprintln!(
-            "skipping: chibi-scheme submodule not checked out at {}\n\
+            "skipping: corpus `{name}` not checked out at {}\n\
              run `git submodule update --init --depth 1` to enable this test",
             root.display()
         );
@@ -44,28 +48,27 @@ fn chibi_scheme_corpus_parses() {
     }
 
     let mut files = Vec::new();
-    collect_scheme_files(&root, &mut files);
+    collect_files(&root, exts, &mut files);
     files.sort();
     assert!(
         !files.is_empty(),
-        "no .scm/.sld files found under {}",
+        "no source files found under {}",
         root.display()
     );
 
-    let opts = Options::scheme();
     let mut failures: Vec<(PathBuf, usize, String)> = Vec::new();
     let mut parsed_count = 0usize;
     let mut skipped: Vec<PathBuf> = Vec::new();
 
     for path in &files {
-        // sexpp reads UTF-8 (`&str`) by contract; non-UTF-8 files (e.g. the
-        // deliberately-encoded unicode tests) are skipped, but reported.
+        // sexpp reads UTF-8 (`&str`) by contract (ADR-0017); non-UTF-8 files are
+        // skipped, but reported.
         let Ok(src) = fs::read_to_string(path) else {
             skipped.push(path.clone());
             continue;
         };
         parsed_count += 1;
-        let parsed = parse(&src, &opts);
+        let parsed = parse(&src, opts);
         if !parsed.errors.is_empty() {
             let first = &parsed.errors[0];
             let snippet = src
@@ -82,7 +85,7 @@ fn chibi_scheme_corpus_parses() {
     }
 
     eprintln!(
-        "chibi-scheme corpus: {} files found, {} parsed, {} skipped (non-UTF-8), {} with parse errors",
+        "corpus `{name}`: {} files found, {} parsed, {} skipped (non-UTF-8), {} with parse errors",
         files.len(),
         parsed_count,
         skipped.len(),
@@ -99,15 +102,28 @@ fn chibi_scheme_corpus_parses() {
         eprintln!("  {} ({} errors) — {}", rel.display(), n, detail);
     }
 
-    // Guard against a hollow-green run (e.g. everything silently skipped).
     assert!(
-        parsed_count > 500,
-        "only {} files parsed — corpus may be missing or mostly skipped",
-        parsed_count
+        parsed_count > min_files,
+        "only {parsed_count} files parsed — corpus may be missing or mostly skipped"
     );
     assert!(
         failures.is_empty(),
-        "{} corpus files failed to parse cleanly",
+        "{} files in corpus `{name}` failed to parse cleanly",
         failures.len()
+    );
+}
+
+#[test]
+fn chibi_scheme_corpus_parses() {
+    check_corpus("chibi-scheme", &["scm", "sld"], &Options::scheme(), 500);
+}
+
+#[test]
+fn clojure_corpus_parses() {
+    check_corpus(
+        "clojure",
+        &["clj", "cljc", "cljs"],
+        &Options::clojure(),
+        100,
     );
 }

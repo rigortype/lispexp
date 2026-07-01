@@ -1,3 +1,6 @@
 [submodule "tests/corpus/chibi-scheme"]
 	path = tests/corpus/chibi-scheme
 	url = https://github.com/ashinn/chibi-scheme
+[submodule "tests/corpus/clojure"]
+	path = tests/corpus/clojure
+	url = https://github.com/clojure/clojure

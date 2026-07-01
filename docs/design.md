@@ -214,3 +214,19 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
   `Str` (under-counts embedded complexity — accepted); `foo.bar` dotted access is
   kept as a single `Symbol` rather than expanded to `(. foo bar)`; `#!` shebang is
   skipped as a leading line.
+
+## Implementation status
+
+Implemented dialects: **Scheme** (`Options::scheme`) and **Clojure** (`Options::clojure`).
+Both are exercised by a real-world corpus under `tests/corpus/` (chibi-scheme:
+610 files; clojure/clojure: 142 files) — all parse with zero errors.
+
+Clojure first-cut simplifications (structure is always correct; these concern
+retained detail):
+
+- **Metadata** `^meta form` / `#^meta form`: parsed as `Prefixed{Meta, target}` — the
+  target is wrapped correctly (one form) but the metadata content is consumed and not
+  retained yet.
+- **Regex** `#"..."`: kept as a `Str` leaf (the raw slice starts with `#"`), not a
+  distinct kind.
+- **Symbolic values** `##Inf` / `##-Inf` / `##NaN`: self-contained `Number` leaves.
