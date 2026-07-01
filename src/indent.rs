@@ -6,6 +6,12 @@
 //! definitions: control and binding macros like `when`, `dolist`, and
 //! `with-slots` carry indent specs too, and none of them is a def-form.
 //!
+//! The table is **owned** (no borrow of the harvested source): its whole
+//! purpose is to be merged across many files and outlive them all — see
+//! [`harvest_indent_specs_into`] and [`IndentTable::extend`]. An indent table
+//! is dozens of tiny entries per file; owning costs nothing, unlike the Datum
+//! tree (ADR-0008).
+//!
 //! Harvesting is Emacs-Lisp-specific for now (ADR-0022): the source of indent
 //! specs is elisp's `declare`/`lisp-indent-function`. The [`IndentSpec`] *type*
 //! is general, but other dialects' specs (Clojure's `:style/indent`, …) are the
@@ -16,7 +22,7 @@
 
 use std::collections::HashMap;
 
-use crate::datum::{Datum, DatumKind, Prefix};
+use crate::datum::{Datum, DatumKind, Delim, Prefix};
 use crate::options::Options;
 use crate::reader::parse;
 
@@ -25,39 +31,50 @@ use crate::reader::parse;
 /// The known elisp grammar is captured by type; anything unexpected falls back
 /// to [`IndentSpec::Raw`], staying faithful. `Function` holds a function *name
 /// only* — lispexp neither resolves nor runs it (reader-only).
-#[derive(Debug, Clone, PartialEq)]
-pub enum IndentSpec<'a> {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum IndentSpec {
     /// An integer indent (`(declare (indent 2))`).
     Number(u32),
     /// The special `defun` indentation (`(declare (indent defun))`).
     Defun,
     /// A custom indent-function *name* — not resolved or run.
-    Function(&'a str),
-    /// Any other spec, kept verbatim.
-    Raw(Datum<'a>),
+    Function(String),
+    /// Any other spec, kept as its verbatim source text.
+    Raw(String),
 }
 
 /// A first-class `symbol → IndentSpec` table, independent of the definition
-/// registry (ADR-0022).
-#[derive(Debug, Clone, Default)]
-pub struct IndentTable<'a> {
-    specs: HashMap<&'a str, IndentSpec<'a>>,
+/// registry (ADR-0022). Owned: merge tables from many files and keep one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IndentTable {
+    specs: HashMap<String, IndentSpec>,
 }
 
-impl<'a> IndentTable<'a> {
+impl IndentTable {
     /// An empty table.
     pub fn new() -> Self {
         IndentTable::default()
     }
 
     /// Insert a spec, overwriting any existing entry for `symbol`.
-    pub fn insert(&mut self, symbol: &'a str, spec: IndentSpec<'a>) {
-        self.specs.insert(symbol, spec);
+    pub fn insert(&mut self, symbol: impl Into<String>, spec: IndentSpec) {
+        self.specs.insert(symbol.into(), spec);
     }
 
     /// The indent spec for `symbol`, if any.
-    pub fn get(&self, symbol: &str) -> Option<&IndentSpec<'a>> {
+    pub fn get(&self, symbol: &str) -> Option<&IndentSpec> {
         self.specs.get(symbol)
+    }
+
+    /// Remove and return the spec for `symbol`, if any.
+    pub fn remove(&mut self, symbol: &str) -> Option<IndentSpec> {
+        self.specs.remove(symbol)
+    }
+
+    /// Merge `other` into `self`; on a symbol collision, `other`'s spec wins.
+    pub fn merge(&mut self, other: IndentTable) {
+        self.specs.extend(other.specs);
     }
 
     /// The number of entries.
@@ -70,44 +87,71 @@ impl<'a> IndentTable<'a> {
         self.specs.is_empty()
     }
 
-    /// Iterate `(symbol, spec)` entries.
-    pub fn iter(&self) -> impl Iterator<Item = (&&'a str, &IndentSpec<'a>)> {
-        self.specs.iter()
+    /// Iterate `(symbol, spec)` entries (no defined order).
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &IndentSpec)> {
+        self.specs.iter().map(|(k, v)| (k.as_str(), v))
+    }
+}
+
+impl Extend<(String, IndentSpec)> for IndentTable {
+    fn extend<T: IntoIterator<Item = (String, IndentSpec)>>(&mut self, iter: T) {
+        self.specs.extend(iter);
     }
 }
 
 /// Harvest indent specs from Emacs Lisp `source` into a fresh [`IndentTable`]
-/// (ADR-0022).
+/// (ADR-0022). For a many-file harvest, prefer [`harvest_indent_specs_into`].
+pub fn harvest_indent_specs(source: &str) -> IndentTable {
+    let mut table = IndentTable::new();
+    harvest_indent_specs_into(source, &mut table);
+    table
+}
+
+/// Harvest indent specs from Emacs Lisp `source` into an existing table,
+/// so specs from many files accumulate into one merged table. Returns the
+/// number of entries added or replaced.
 ///
 /// Collects both signals across the whole source, for definitions and
 /// non-definitions alike:
 /// - `(declare (indent SPEC))` inside a `def…`/`cl-def…` form → the form's name;
 /// - `(put 'SYM 'lisp-indent-function SPEC)` and the `function-put` equivalent.
-pub fn harvest_indent_specs(source: &str) -> IndentTable<'_> {
+pub fn harvest_indent_specs_into(source: &str, table: &mut IndentTable) -> usize {
     let parsed = parse(source, &Options::emacs_lisp());
-    let mut table = IndentTable::new();
+    let before = table.len();
+    let mut replaced = 0;
     for form in &parsed.data {
-        harvest_form(form, &mut table);
+        harvest_form(source, form, table, &mut replaced);
     }
-    table
+    table.len() - before + replaced
 }
 
-fn harvest_form<'a>(form: &Datum<'a>, table: &mut IndentTable<'a>) {
-    let DatumKind::List { items, .. } = &form.kind else {
+fn harvest_form(source: &str, form: &Datum<'_>, table: &mut IndentTable, replaced: &mut usize) {
+    let DatumKind::List { delim, items, .. } = &form.kind else {
         return;
     };
+    // Square/curly lists are data in elisp (vectors); a `(put …)` inside one is
+    // never executed — don't harvest from it.
+    if *delim != Delim::Round {
+        return;
+    }
     if let Some(head) = list_head(items) {
-        harvest_put(head, items, table);
-        harvest_declare(head, items, table);
+        harvest_put(source, head, items, table, replaced);
+        harvest_declare(source, head, items, table, replaced);
     }
     // Recurse: indent-affecting forms may be nested (progn, eval-when-compile…).
     for item in items {
-        harvest_form(item, table);
+        harvest_form(source, item, table, replaced);
     }
 }
 
 /// A `(put 'SYM 'lisp-indent-function SPEC)` / `(function-put …)` form.
-fn harvest_put<'a>(head: &str, items: &[Datum<'a>], table: &mut IndentTable<'a>) {
+fn harvest_put(
+    source: &str,
+    head: &str,
+    items: &[Datum<'_>],
+    table: &mut IndentTable,
+    replaced: &mut usize,
+) {
     if head != "put" && head != "function-put" {
         return;
     }
@@ -121,12 +165,18 @@ fn harvest_put<'a>(head: &str, items: &[Datum<'a>], table: &mut IndentTable<'a>)
         return;
     }
     if let Some(spec) = items.get(3) {
-        table.insert(symbol, indent_spec(spec));
+        insert_spec(source, symbol, spec, table, replaced);
     }
 }
 
 /// A `(def… NAME … (declare … (indent SPEC) …) …)` form.
-fn harvest_declare<'a>(head: &str, items: &[Datum<'a>], table: &mut IndentTable<'a>) {
+fn harvest_declare(
+    source: &str,
+    head: &str,
+    items: &[Datum<'_>],
+    table: &mut IndentTable,
+    replaced: &mut usize,
+) {
     if !(head.starts_with("def") || head.starts_with("cl-def")) {
         return;
     }
@@ -145,7 +195,7 @@ fn harvest_declare<'a>(head: &str, items: &[Datum<'a>], table: &mut IndentTable<
             if let Some(cl) = list_head_items(clause) {
                 if list_head(cl) == Some("indent") {
                     if let Some(spec) = cl.get(1) {
-                        table.insert(name, indent_spec(spec));
+                        insert_spec(source, name, spec, table, replaced);
                     }
                 }
             }
@@ -153,21 +203,41 @@ fn harvest_declare<'a>(head: &str, items: &[Datum<'a>], table: &mut IndentTable<
     }
 }
 
-/// Classify an indent spec datum. Unwraps a leading quote (for `put` forms).
-fn indent_spec<'a>(spec: &Datum<'a>) -> IndentSpec<'a> {
+/// Classify and insert an indent spec; an elisp `nil` spec means "no special
+/// indent" and yields no entry.
+fn insert_spec(
+    source: &str,
+    symbol: &str,
+    spec: &Datum<'_>,
+    table: &mut IndentTable,
+    replaced: &mut usize,
+) {
+    if let Some(classified) = indent_spec(source, spec) {
+        if table.get(symbol).is_some() {
+            *replaced += 1;
+        }
+        table.insert(symbol, classified);
+    }
+}
+
+/// Classify an indent spec datum. Unwraps a leading quote (for `put` forms);
+/// `nil` yields `None` (no special indent).
+fn indent_spec(source: &str, spec: &Datum<'_>) -> Option<IndentSpec> {
     match &spec.kind {
-        DatumKind::Number(n) => n
-            .parse::<u32>()
-            .map(IndentSpec::Number)
-            .unwrap_or_else(|_| IndentSpec::Raw(spec.clone())),
-        DatumKind::Symbol("defun") => IndentSpec::Defun,
-        DatumKind::Symbol(name) => IndentSpec::Function(name),
+        DatumKind::Number(n) => Some(
+            n.parse::<u32>()
+                .map(IndentSpec::Number)
+                .unwrap_or_else(|_| IndentSpec::Raw(spec.span.text(source).to_owned())),
+        ),
+        DatumKind::Symbol("nil") => None,
+        DatumKind::Symbol("defun") => Some(IndentSpec::Defun),
+        DatumKind::Symbol(name) => Some(IndentSpec::Function((*name).to_owned())),
         DatumKind::Prefixed {
             prefix: Prefix::Quote,
             inner,
             ..
-        } => indent_spec(inner),
-        _ => IndentSpec::Raw(spec.clone()),
+        } => indent_spec(source, inner),
+        _ => Some(IndentSpec::Raw(spec.span.text(source).to_owned())),
     }
 }
 
@@ -224,7 +294,10 @@ mod tests {
     #[test]
     fn declare_indent_function_name() {
         let table = harvest_indent_specs("(defmacro m (a) (declare (indent my-indent-fn)) a)");
-        assert_eq!(table.get("m"), Some(&IndentSpec::Function("my-indent-fn")));
+        assert_eq!(
+            table.get("m"),
+            Some(&IndentSpec::Function("my-indent-fn".into()))
+        );
     }
 
     #[test]
@@ -256,7 +329,48 @@ mod tests {
     #[test]
     fn raw_fallback_for_list_spec() {
         let table = harvest_indent_specs("(put 'weird 'lisp-indent-function '(1 2))");
-        assert!(matches!(table.get("weird"), Some(IndentSpec::Raw(_))));
+        assert_eq!(table.get("weird"), Some(&IndentSpec::Raw("(1 2)".into())));
+    }
+
+    #[test]
+    fn nil_spec_yields_no_entry() {
+        // `nil` means "no special indent" — not an indent function named nil.
+        let table = harvest_indent_specs("(put 'plain 'lisp-indent-function nil)");
+        assert!(table.get("plain").is_none());
+    }
+
+    #[test]
+    fn vector_literal_content_is_not_harvested() {
+        // A (put …) inside an elisp `[…]` vector is data, never executed.
+        let table = harvest_indent_specs("(defconst k [(put 'y 'lisp-indent-function 5)])");
+        assert!(table.get("y").is_none());
+    }
+
+    #[test]
+    fn quoted_list_content_is_not_harvested() {
+        let table = harvest_indent_specs("(defvar d '((put 'z 'lisp-indent-function 5)))");
+        assert!(table.get("z").is_none());
+    }
+
+    #[test]
+    fn table_outlives_and_merges_across_sources() {
+        // The owned table accumulates across files and outlives the sources.
+        let mut table = IndentTable::new();
+        {
+            let src_a = String::from("(put 'a 'lisp-indent-function 1)");
+            let src_b = String::from("(put 'b 'lisp-indent-function 2)");
+            harvest_indent_specs_into(&src_a, &mut table);
+            harvest_indent_specs_into(&src_b, &mut table);
+            // src_a / src_b dropped here.
+        }
+        assert_eq!(table.get("a"), Some(&IndentSpec::Number(1)));
+        assert_eq!(table.get("b"), Some(&IndentSpec::Number(2)));
+
+        // merge: later table wins on collision.
+        let mut other = IndentTable::new();
+        other.insert("a", IndentSpec::Defun);
+        table.merge(other);
+        assert_eq!(table.get("a"), Some(&IndentSpec::Defun));
     }
 
     #[test]

@@ -69,8 +69,8 @@ impl LineIndex {
 
     /// Map a byte `offset` to a 1-based `(line, column)`. Columns are byte
     /// offsets from the line start. An offset past end-of-source clamps to the
-    /// last position; an offset on the terminator maps to the column just past
-    /// the last content byte.
+    /// last position; an offset on a terminator byte maps past the line's
+    /// content (on `\r` of a `\r\n`: content length + 1; on the `\n`: + 2).
     pub fn offset_to_line_col(&self, offset: u32) -> (u32, u32) {
         let offset = offset.min(self.len);
         // Number of lines whose start is <= offset == the 1-based line.
@@ -80,11 +80,12 @@ impl LineIndex {
     }
 
     /// Map a 1-based `(line, column)` back to a byte offset. `line` and `col`
-    /// are clamped to valid ranges; the result never exceeds the source length.
+    /// are clamped to valid ranges: an overflowing `col` clamps to just past
+    /// the line's last content byte and never bleeds into a following line.
     pub fn line_col_to_offset(&self, line: u32, col: u32) -> u32 {
         let idx = (line.max(1) as usize).min(self.lines.len()) - 1;
-        let start = self.lines[idx].start;
-        (start + col.saturating_sub(1)).min(self.len)
+        let line = self.lines[idx];
+        (line.start + col.saturating_sub(1)).min(line.end)
     }
 
     /// The byte range of line `n`'s content (1-based, terminator excluded), or
@@ -173,7 +174,22 @@ mod tests {
         let idx = LineIndex::new("ab\ncd");
         assert_eq!(idx.line_col_to_offset(1, 1), 0);
         assert_eq!(idx.line_col_to_offset(2, 1), 3);
-        assert_eq!(idx.line_col_to_offset(99, 99), 5); // clamped to len
+        assert_eq!(idx.line_col_to_offset(99, 99), 5); // clamped to last line end
         assert_eq!(idx.line_col_to_offset(0, 0), 0); // clamped up to line 1 col 1
+    }
+
+    #[test]
+    fn col_overflow_stays_on_its_line() {
+        // A column past the line's content clamps within that line — it must
+        // never resolve to a byte on a following line.
+        let idx = LineIndex::new("ab\ncd");
+        let off = idx.line_col_to_offset(1, 10);
+        assert_eq!(off, 2); // just past "ab", before the '\n'
+        assert_eq!(idx.offset_to_line_col(off).0, 1);
+
+        // Same for a CRLF line: never lands between '\r' and '\n' or beyond.
+        let idx = LineIndex::new("ab\r\ncd");
+        let off = idx.line_col_to_offset(1, 10);
+        assert_eq!(off, 2); // just past "ab", before the "\r\n"
     }
 }
