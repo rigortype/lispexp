@@ -1,7 +1,7 @@
 //! Lexer (Layer 1) tests: the token stream tiles the input and surfaces
 //! strings and comments as spans — what a parinfer backend needs (ADR-0015).
 
-use sexpp::{lex, Delim, Options, TokenKind};
+use lispexp::{lex, Delim, Options, TokenKind};
 
 #[test]
 fn tokens_tile_the_input() {
@@ -36,7 +36,7 @@ fn delimiters_carry_their_shape() {
     // Enable curly as a delimiter for this check by starting from Scheme and
     // flipping the brace role.
     let mut opts = Options::scheme();
-    opts.curly = sexpp::DelimRole::List;
+    opts.curly = lispexp::DelimRole::List;
 
     let kinds: Vec<TokenKind> = lex(src, &opts).map(|t| t.kind).collect();
     assert_eq!(

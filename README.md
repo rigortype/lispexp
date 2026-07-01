@@ -1,8 +1,8 @@
-# S-Expressions Parser (sexpp)
+# Lisp S-Expressions Parser (lispexp)
 
 A pure-Rust **reader** (lexer + parser) for S-expression syntax across many Lisp-family dialects, producing a faithful, position-annotated, code-vs-data-aware parse tree.
 
-sexpp is deliberately reader-only: it does **not** evaluate, expand macros, or interpret the numeric tower. It reads source text into data — the shape, positions, and reader-macro structure needed to statically analyze Lisp code.
+lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or interpret the numeric tower. It reads source text into data — the shape, positions, and reader-macro structure needed to statically analyze Lisp code.
 
 ## Features
 

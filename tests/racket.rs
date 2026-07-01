@@ -1,6 +1,6 @@
 //! Reader tests for the Racket dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Options, Parsed, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Options, Parsed, Prefix};
 
 fn rkt(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::racket());

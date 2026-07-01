@@ -1,7 +1,7 @@
 //! Fault-tolerance tests: malformed input yields a partial tree plus errors,
 //! never a panic (ADR-0004).
 
-use sexpp::{parse, DatumKind, Options};
+use lispexp::{parse, DatumKind, Options};
 
 #[test]
 fn unclosed_list_recovers() {

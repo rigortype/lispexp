@@ -1,6 +1,6 @@
 //! Reader tests for the Common Lisp dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
 
 fn cl(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::common_lisp());

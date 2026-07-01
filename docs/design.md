@@ -1,4 +1,4 @@
-# sexpp — consolidated data model & API design
+# lispexp — consolidated data model & API design
 
 Status: **design / pre-implementation**. This is the crate's own design sketch (the
 *what*). The *why* behind each choice lives in [docs/adr/](./adr/); the domain
@@ -105,7 +105,7 @@ pub fn lex<'a>(source: &'a str, options: &Options) -> impl Iterator<Item = Token
 
 The Lexer lexes linearly and never performs the top-level resync that is a *parser*
 policy (ADR-0004); unclosed strings/comments/parens are reported as such, not recovered.
-**Non-goal:** sexpp provides the lexical analysis, not the parinfer paren-inference
+**Non-goal:** lispexp provides the lexical analysis, not the parinfer paren-inference
 algorithm — that stays in the consumer.
 
 ## Reader API shape
@@ -217,7 +217,7 @@ parsing component / entry point. Public surface: `Parsed`, `Datum`, `DatumKind`,
 
 ## Definition-form annotator (ADR-0019)
 
-Implemented as the `sexpp::annotate` module — a best-effort utility layer over the
+Implemented as the `lispexp::annotate` module — a best-effort utility layer over the
 `Datum` tree (not part of the reader core). A `Registry` of `FormSpec`s (from
 `emacs_lisp_builtins()` plus `harvest_source()`, which reads a def-macro's own
 arglist parameter names and `declare` metadata) drives `annotate_form` /

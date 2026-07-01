@@ -1,6 +1,6 @@
 //! Reader (datum-tree) tests for the Scheme dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
 
 fn scheme(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::scheme());

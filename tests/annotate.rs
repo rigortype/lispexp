@@ -1,11 +1,11 @@
 //! Tests for the definition-form annotator (ADR-0019).
 
-use sexpp::annotate::{
+use lispexp::annotate::{
     annotate_form, annotate_tree, emacs_lisp_builtins, harvest_source, Confidence, Registry, Role,
 };
-use sexpp::{parse, DatumKind, Options};
+use lispexp::{parse, DatumKind, Options};
 
-fn el_data(src: &str) -> Vec<sexpp::Datum<'_>> {
+fn el_data(src: &str) -> Vec<lispexp::Datum<'_>> {
     parse(src, &Options::emacs_lisp()).data
 }
 

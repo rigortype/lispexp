@@ -1,6 +1,6 @@
 //! Reader tests for the Guile dialect.
 
-use sexpp::{parse, Datum, DatumKind, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Options, Prefix};
 
 fn guile(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::guile());

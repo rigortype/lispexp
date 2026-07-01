@@ -1,4 +1,4 @@
-//! sexpp — a pure-Rust reader (lexer + parser) for S-expression syntax across
+//! lispexp — a pure-Rust reader (lexer + parser) for S-expression syntax across
 //! many Lisp dialects.
 //!
 //! The crate is deliberately reader-only: it does not evaluate, expand macros,
@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```
-//! use sexpp::{parse, DatumKind, Options};
+//! use lispexp::{parse, DatumKind, Options};
 //!
 //! let parsed = parse("(define (square x) (* x x))", &Options::scheme());
 //! assert!(parsed.errors.is_empty());

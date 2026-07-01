@@ -1,6 +1,6 @@
 //! Reader tests for the Fennel dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Options, Prefix};
 
 fn fnl(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::fennel());

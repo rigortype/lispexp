@@ -2,7 +2,7 @@
 //! `#` comments, splice/mutable/short-fn glyphs), Hy (bracket strings), and
 //! AutoLISP (`;|...|;` block comments).
 
-use sexpp::{parse, DatumKind, Delim, Options, Prefix};
+use lispexp::{parse, DatumKind, Delim, Options, Prefix};
 
 // --- Janet -----------------------------------------------------------------
 

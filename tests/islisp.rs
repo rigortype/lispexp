@@ -1,6 +1,6 @@
 //! Reader tests for the ISLisp (ISO/IEC 13816) dialect.
 
-use sexpp::{parse, Datum, DatumKind, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Options, Prefix};
 
 fn isl(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::islisp());

@@ -1,6 +1,6 @@
 //! Reader tests for the Phel dialect (essentially Clojure's reader).
 
-use sexpp::{parse, Datum, DatumKind, Delim, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Options, Prefix};
 
 fn phel(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::phel());

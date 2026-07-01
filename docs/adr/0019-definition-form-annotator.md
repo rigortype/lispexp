@@ -83,7 +83,7 @@ fabricates structure from a weak signal alone.
 
 **Bundled builtins.** GNU Emacs's own definition-macro specs are harvested from
 the Emacs source tree (checked out at `/Users/megurine/local/src/emacs`) and
-shipped as a generated built-in registry, so sexpp recognizes the standard
+shipped as a generated built-in registry, so lispexp recognizes the standard
 def-forms out of the box. The harvester can additionally scan a user's project
 directory to extend the registry with project-local definition macros.
 
@@ -98,7 +98,7 @@ tree. The shared data is a **form spec** / **form-spec registry**.
 - **Consistent with reader-only scope (ADR-0001).** No evaluation or
   macro-expansion happens; the annotator only interprets declared metadata. It is
   an optional module built on the tree, keeping the reader core untouched — likely
-  a feature-gated module (e.g. `sexpp::annotate`) or sibling.
+  a feature-gated module (e.g. `lispexp::annotate`) or sibling.
 - **Heuristic / best-effort.** `declare`/Edebug specs are advisory and
   incomplete: some macros lack a spec, some do arbitrary things. The annotator
   annotates what it can confidently recognize and leaves the rest un-annotated;

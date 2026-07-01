@@ -1,13 +1,13 @@
 ---
-name: sexpp-release-prep
-description: Prepare a sexpp crates.io release by bumping the crate version, sealing the changelog, running release verification, and tagging so GitHub Actions publishes. Use when the user asks to prepare the next version, cut a release, refresh release metadata, or make versioned files consistent before tagging.
+name: lispexp-release-prep
+description: Prepare a lispexp crates.io release by bumping the crate version, sealing the changelog, running release verification, and tagging so GitHub Actions publishes. Use when the user asks to prepare the next version, cut a release, refresh release metadata, or make versioned files consistent before tagging.
 metadata:
   internal: true
 ---
 
-# sexpp Release Prep
+# lispexp Release Prep
 
-Follow this workflow to release a new `sexpp` version to [crates.io](https://crates.io/crates/sexpp).
+Follow this workflow to release a new `lispexp` version to [crates.io](https://crates.io/crates/lispexp).
 
 **Publishing is automated.** A human/agent prepares the release locally (version
 bump, changelog, verify, commit) and pushes a `vX.Y.Z` tag; the
@@ -68,7 +68,7 @@ notes, not commit messages.
   release date in every version heading.
 - Update the bottom-of-file links: point `[Unreleased]` at
   `compare/vx.y.z...HEAD` and add `[x.y.z]:
-  https://github.com/rigortype/sexpp/releases/tag/vx.y.z`.
+  https://github.com/rigortype/lispexp/releases/tag/vx.y.z`.
 
 ## Verify the release
 

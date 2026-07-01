@@ -1,6 +1,6 @@
 //! Reader tests for the LFE (Lisp Flavoured Erlang) dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Options, Prefix};
 
 fn lfe(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::lfe());

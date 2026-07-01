@@ -1,6 +1,6 @@
 //! Reader tests for the Emacs Lisp dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Options, Prefix};
 
 fn el(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::emacs_lisp());

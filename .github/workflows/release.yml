@@ -2,7 +2,7 @@ name: Release
 
 # Publishes to crates.io and creates a GitHub Release when a `vX.Y.Z` tag is
 # pushed. Requires the repository secret CARGO_REGISTRY_TOKEN (a crates.io API
-# token). See .claude/skills/sexpp-release-prep/SKILL.md.
+# token). See .claude/skills/lispexp-release-prep/SKILL.md.
 
 on:
   push:

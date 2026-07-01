@@ -8,7 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use sexpp::{parse, Options};
+use lispexp::{parse, Options};
 
 fn corpus_dir(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -67,7 +67,7 @@ fn check_corpus(name: &str, exts: &[&str], opts: &Options, min_files: usize, exc
     let mut skipped: Vec<PathBuf> = Vec::new();
 
     for path in &files {
-        // sexpp reads UTF-8 (`&str`) by contract (ADR-0017); non-UTF-8 files are
+        // lispexp reads UTF-8 (`&str`) by contract (ADR-0017); non-UTF-8 files are
         // skipped, but reported.
         let Ok(src) = fs::read_to_string(path) else {
             skipped.push(path.clone());

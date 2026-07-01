@@ -1,4 +1,4 @@
-# sexpp
+# lispexp
 
 A pure-Rust reader (lexer + parser) for S-expression syntax across multiple Lisp dialects — Scheme, Guile, Racket, Common Lisp, Emacs Lisp, Clojure, Hy, Phel, Fennel, LFE, ISLisp, AutoLISP, and Janet — producing a faithful, position-annotated, code-vs-data-aware parse tree. It deliberately excludes evaluation and macro-expansion.
 
@@ -9,8 +9,10 @@ A single parsed unit of S-expression syntax — a list, symbol, number, string, 
 _Avoid_: node, expression, form
 
 **Dialect**:
-One of the named presets of Options that bundle the individually-toggleable syntax settings sexpp can read. A Dialect is a convenience constructor, not a separate code path — the underlying Reader and Options are shared across all dialects. A Dialect may build on another's preset rather than starting from scratch (e.g. Racket layers onto the Scheme preset; Phel layers onto the Clojure preset).
+One of the named presets of Options that bundle the individually-toggleable syntax settings lispexp can read. A Dialect is a convenience constructor, not a separate code path — the underlying Reader and Options are shared across all dialects. A Dialect may build on another's preset rather than starting from scratch (e.g. Racket layers onto the Scheme preset; Phel layers onto the Clojure preset).
 _Avoid_: language
+
+EDN is a Dialect too, but a **data-only** one: its preset layers on Clojure with the code-only reader syntax (`#(`, `#'`, `#?`, `#"…"`, `@`) turned off, since EDN is Clojure's data subset (ADR-0025).
 
 **Options**:
 The orthogonal, individually-toggleable syntax settings a Reader is configured with (e.g. delimiter meaning, string/char syntax, keyword syntax, block-comment delimiters and nesting) — the mechanism Dialect support is built from, modeled after `lexpr`'s `Options` builder.
@@ -24,11 +26,11 @@ A dialect-specific leading directive (e.g. Racket's `#lang racket`) that is not 
 _Avoid_: shebang (similar shape, but a lang line changes reader configuration, not just execution)
 
 **Reader**:
-The upper of sexpp's two layers: builds a tree of Datums on top of the Lexer. Deliberately excludes evaluation, macro-expansion, and the numeric tower.
+The upper of lispexp's two layers: builds a tree of Datums on top of the Lexer. Deliberately excludes evaluation, macro-expansion, and the numeric tower.
 _Avoid_: interpreter, evaluator
 
 **Lexer**:
-The lower of sexpp's two layers: turns source into a linear token stream that tiles the input, surfacing delimiters, atoms, strings, comments, and reader markers as spans. Independently consumable — a parinfer-style tool uses the Lexer without the Reader's Datum tree. Shares the same Options as the Reader.
+The lower of lispexp's two layers: turns source into a linear token stream that tiles the input, surfacing delimiters, atoms, strings, comments, and reader markers as spans. Independently consumable — a parinfer-style tool uses the Lexer without the Reader's Datum tree. Shares the same Options as the Reader.
 _Avoid_: tokenizer (acceptable synonym, but "Lexer" is the canonical term here), scanner
 
 **Reader macro**:
@@ -36,18 +38,18 @@ Reading-time syntax that tags a following Datum rather than transforming source 
 _Avoid_: macro (alone — risks confusion with `defmacro`/`syntax-rules`-level code macros, which are out of scope)
 
 **Notation**:
-Whether a reader-macro form appeared in its shorthand token form (e.g. `'x`) or its explicit long-hand call form (e.g. `(quote x)`). sexpp preserves this distinction on `Prefixed` datums rather than normalizing it away, keeping future round-trip serialization feasible.
+Whether a reader-macro form appeared in its shorthand token form (e.g. `'x`) or its explicit long-hand call form (e.g. `(quote x)`). lispexp preserves this distinction on `Prefixed` datums rather than normalizing it away, keeping future round-trip serialization feasible.
 
 **Improper list**:
 A list whose final tail is not the empty list — a dotted pair `(a . b)` or `(a b . c)`. Modeled as an ordinary List with a present dotted tail rather than a separate kind, so proper lists are the tail-absent special case.
 _Avoid_: dotted list (as a distinct type — it is the same List with a tail)
 
 **Hash literal**:
-A `#`-tagged reader form treated as data — vectors (`#(...)`, `#u8(...)`), maps/structs (`#M(...)`, `#S(...)`), tagged literals (`#inst`, `#px"..."`), and dialect radix/array forms. sexpp captures the tag verbatim and does not validate it against a per-dialect whitelist.
+A `#`-tagged reader form treated as data — vectors (`#(...)`, `#u8(...)`), maps/structs (`#M(...)`, `#S(...)`), tagged literals (`#inst`, `#px"..."`), and dialect radix/array forms. lispexp captures the tag verbatim and does not validate it against a per-dialect whitelist.
 _Avoid_: reader tag (reserve for the tag string itself)
 
 **Datum label**:
-A `#n=<datum>` definition and its `#n#` reference (Scheme/Common Lisp/Racket), marking shared or cyclic structure. sexpp records them structurally but does not resolve the graph, consistent with being reader-only.
+A `#n=<datum>` definition and its `#n#` reference (Scheme/Common Lisp/Racket), marking shared or cyclic structure. lispexp records them structurally but does not resolve the graph, consistent with being reader-only.
 
 **Form spec**:
 A description of a definition form's argument structure — which position is the defined name, the arglist, the docstring, the body — derived from a macro's declared Edebug `debug` spec (leading with `&define`) plus `doc-string`/`indent` declarations. Collected into a form-spec registry (ADR-0019).
@@ -58,8 +60,42 @@ The component that scans Emacs Lisp source and derives Form specs into a registr
 **Form annotator**:
 The component that walks a Datum tree and, for each list whose head matches a Form spec, tags the children with their roles (name, arglist, docstring, body). A best-effort utility layer over the tree — it reads declared metadata, never expands macros (ADR-0019, consistent with [[reader-only-scope]]). (Tentatively called "macro-annotator".)
 
+**Form-spec registry**:
+The per-Dialect collection of Form specs the annotator matches against. lispexp bundles a conservative, high-confidence *core* per dialect (the uncontested def-forms) and exposes a builder so consumers extend or override it; the long tail of project-local or contested def-forms is the consumer's to supply (ADR-0020).
+
+**Kind**:
+A definition's raw head symbol, kept verbatim (`"defun"`, `"defn"`, `"defmethod"`). Always faithful and reader-only.
+_Avoid_: type, category (reserve "category" for the optional hint below)
+
+**Category**:
+An optional, normalized classification hint on a Form spec (function / macro / variable / class / method …), attached only where the mapping is uncontested. Ambiguous forms (e.g. Clojure `def`) carry no category and expose only their Kind (ADR-0020).
+
+**Qualifier**:
+An optional method modifier appearing between a method's name and its arglist — CL/elisp `:around`, `:before`, `:after`, or user-defined. Modeled as a greedy, variable-length `Qualifiers` role that consumes children up to the first delimited list (the arglist boundary), read as tokens only (ADR-0021).
+
+**Dispatch value**:
+Clojure `defmethod`'s single arbitrary dispatch datum (e.g. `:circle` in `(defmethod area :circle …)`) — distinct from a Qualifier and modeled as its own one-Datum role (ADR-0021).
+
+**Specializer**:
+The per-parameter type/eql token in a method's *specialized arglist* — `integer` in `(x integer)`, or a whole `(eql form)`. Exposed as verbatim Datums via a `SpecializedArglist` role that splits each required parameter into a `(variable, specializer)` pair; lispexp never resolves types or evaluates the `eql` form (ADR-0021).
+
+**Indent spec**:
+Per-symbol indentation metadata harvested from Emacs's `(declare (indent …))` / `lisp-indent-function`, held in a first-class `symbol → IndentSpec` table independent of the Form-spec registry (control/binding macros like `when`/`dolist` carry indent specs but are not definitions). Typed as `Number` / `Defun` / `Function(name)` / `Raw`, with the function case holding a name only. Harvesting is Emacs-Lisp-specific for now (ADR-0022).
+
 **Fault-tolerant parsing**:
-sexpp's error-recovery model: a syntax error causes the Reader to skip to the start of the next top-level form and resume there, so a single malformed form loses only itself — never the rest of the file. Recovery resynchronizes at top-level granularity only, not within a list.
+lispexp's error-recovery model: a syntax error causes the Reader to skip to the start of the next top-level form and resume there, so a single malformed form loses only itself — never the rest of the file. Recovery resynchronizes at top-level granularity only, not within a list.
+
+**Error kind**:
+The structured classification of a parse diagnostic — a `#[non_exhaustive]` enum (unclosed list, mismatched/unexpected delimiter, malformed token, dangling prefix/tag/label, …) that replaces the old free-form message string. Variants may carry non-positional payload (e.g. expected/found delimiter) but never a Span-derived value, keeping a kind stable across the position shifts an edit causes. The human message is rendered via `Display` (ADR-0023).
+
+**Positioned reparse**:
+Reading exactly one top-level form at/after a given byte offset (`parse_form_at`), returning the form, its errors, and the end offset — spans absolute into the original source. The mechanism consumers use for cheap validate-then-write; the reader supplies it, but the "reject only newly-introduced errors" policy stays with the consumer (ADR-0023, [[fault-tolerant-parsing]]).
+
+**Line index**:
+A public `LineIndex` over a `&str` (computed once, independent of the Datum tree) mapping byte offset ↔ (1-based line, 1-based **byte** column) and line number → byte range. Columns are byte offsets; char/UTF-16 columns are the consumer's to derive from `line_range` (ADR-0024, [[reader-only-scope]] via ADR-0017). Line breaks are `\n`/`\r\n` only.
 
 **Code vs. data classification**:
-Whether a subtree should be treated as executable code (descended into for analysis) or inert data (skipped). Driven by reader-macro nesting: quote marks its contents as data; quasiquote marks its contents as data except nested unquote/unquote-splicing, which flip back to code.
+Whether a subtree should be treated as executable code (descended into for analysis) or inert data (skipped) — a binary `Code`/`Data` class assigned by the criterion "can this be evaluated?". Driven by reader-macro nesting: quote marks its contents as data; quasiquote marks its contents as data except nested unquote/unquote-splicing, which flip back to code. Modeled with a quasiquote-depth counter (quasiquote +1, unquote −1; code iff depth 0), with quote as an absolute data barrier unquote cannot escape (ADR-0026). Surfaced via the [[code-data-walker]].
+
+**Code-data walker**:
+The pruning visitor lispexp exposes over a `Parsed` tree: `visit(&Datum, Class) -> Descend | Skip`, so a consumer descends into code and prunes quoted-data subtrees without reimplementing the flip logic. A best-effort utility layer over the tree; evaluates nothing (ADR-0026, [[reader-only-scope]]).

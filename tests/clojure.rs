@@ -1,6 +1,6 @@
 //! Reader tests for the Clojure dialect.
 
-use sexpp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
 
 fn clj(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::clojure());
