@@ -12,6 +12,6 @@ keywords = ["lisp", "s-expression", "parser", "scheme", "reader"]
 categories = ["parser-implementations"]
 # The corpus submodules under tests/corpus/ are large third-party checkouts used
 # only for local conformance testing — never ship them in the published package.
-exclude = ["/tests/corpus", "/AGENTS.md", "/docs/agents", "/.github", "/.claude"]
+exclude = ["/tests/corpus", "/AGENTS.md", "/docs/agents", "/docs/ssss", "/.github", "/.claude"]
 
 [dependencies]
