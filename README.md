@@ -15,6 +15,12 @@ lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or
 - **Definition-aware utilities.** An opt-in `annotate` module tags definition forms (name, arglist, docstring, body, method dispatch) across dialects, and an `indent` module harvests Emacs Lisp indent specs.
 - **Pure Rust,** no `unsafe`, zero dependencies — cross-compiles cleanly. MSRV 1.70.
 
+## Non-goals
+
+lispexp is a faithful **reader**, not a syntax checker, validator, linter, or conformance tool. It does not evaluate, expand macros, or interpret the numeric tower (it reads code into data), and it does not certify that input is valid in any particular Lisp implementation — it accepts a *superset* of what a given implementation's reader would, reading unknown reader tags (`#foo(…)`), dialect-foreign forms (R6RS `#vu8(…)` under Scheme), and un-interpreted numbers faithfully as data (ADR-0011, ADR-0030).
+
+It does report the **structural** problems that fall out of parsing — unbalanced/mismatched/unexpected delimiters, dangling reader-macro prefixes, malformed tokens — through `Parsed::errors` (an `ErrorKind` per issue), always on; `parsed.errors.is_empty()` is a usable "structurally clean" check. Anything dialect-*semantic* (is this tag/number/keyword legal here?) is out of scope by design; a stricter or dialect-aware validator is a thin layer a consumer builds on `errors` and `parse_form_at`, not a mode of the reader.
+
 ## Install
 
 ```sh

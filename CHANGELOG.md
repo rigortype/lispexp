@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Every `Dialect` variant now carries an explanatory doc comment (what the dialect is, and its Scheme/Clojure lineage where relevant) and the variants are grouped by family; `Dialect::Guile` in particular is documented as GNU Guile, the official extension language of the GNU Project, rather than the terse "Guile Scheme".
 - `Dialect::Scheme` / `Options::scheme()` now document that the Scheme reader tracks the latest small Scheme standard (currently R7RS-small) and reads earlier RnRS as a subset, rather than pinning a version.
 - `Options::emacs_lisp()` is documented as also reading the Emacs Lisp Data format (`lisp-data-mode`, `.eld`); Emacs uses one reader for code and data, so no restricted data-only preset is needed (contrast `Options::edn()`).
+- A README "Non-goals" section and ADR-0030 state that lispexp is a faithful reader, not a validator: it reports structural diagnostics (delimiter balance, dangling prefixes, malformed tokens) via `Parsed::errors`, but accepts a per-implementation superset and does not perform dialect-semantic/conformance validation.
 
 ## [0.2.0] - 2026-07-02
 
