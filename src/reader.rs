@@ -23,9 +23,10 @@ pub struct Parsed<'a> {
 }
 
 /// Parse `source` under `options` into a datum tree. Never panics — including
-/// on pathologically nested input: list/hash nesting deeper than
-/// [`MAX_DEPTH`] stops descending, reports [`ErrorKind::DepthLimitExceeded`]
-/// once, and skips the too-deep subtree (ADR-0004), keeping prior siblings.
+/// on pathologically nested input: list/hash nesting deeper than a fixed
+/// depth cap (ADR-0028) stops descending, reports
+/// [`ErrorKind::DepthLimitExceeded`] once, and skips the too-deep subtree
+/// (ADR-0004), keeping prior siblings.
 /// `source` must be at most `u32::MAX` bytes ([`Span`] stores `u32` offsets).
 #[must_use]
 pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {

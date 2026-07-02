@@ -30,3 +30,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: Package (dry run)
         run: cargo publish --dry-run
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      # The corpus submodules under tests/corpus/ are large and not needed for
+      # the unit tests — the corpus tests self-skip when they are absent.
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.70
+      - name: Check (MSRV)
+        run: cargo check --all-targets

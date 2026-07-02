@@ -31,6 +31,43 @@ Implements seven lisplens-driven feature requests (ADR-0020..0026): polyglot def
 - New `Options` fields backing the above: `char_set_literal`, `regex_slash`,
   `bytevector_vu8`, `keyword_trailing_colon`.
 - A Gauche corpus conformance test.
+- `Datum` accessors — `as_symbol`/`as_keyword`/`as_number`/`as_str`/`as_char`/
+  `items`/`head_symbol`/`text` — replacing hand-rolled `DatumKind` matching in
+  `indent`/`annotate` and available to consumers directly.
+- `Span::len`/`is_empty`/`contains` and `From<Span> for Range<usize>`; the
+  `u32`-offset/4 GiB-input contract on `Span` and on `parse`/`lex` is now
+  documented explicitly.
+- `Dialect::ALL` (a growing, non-exhaustive slice of every known dialect),
+  `Dialect::options()` sugar for `Options::for_dialect`, and a kebab-case
+  `Display`/`FromStr` pair (`ParseDialectError`) for round-tripping dialect
+  names (e.g. `"common-lisp"`).
+- `UnterminatedKind`: `TokenKind::Unterminated(UnterminatedKind)` replaces the
+  single `TokenKind::Error`, distinguishing the seven EOF states the lexer can
+  land in (`Str`, `PipedSymbol`, `BlockComment { depth }`, `LongString`,
+  `BracketString`, `CharSet`, `Regex`).
+- `CharRoles` (ADR-0016): a first-class `Options::roles` sub-struct collecting
+  the per-dialect reader-macro prefix glyph table (quote/quasiquote/unquote/
+  splicing-suffix/deref/meta/splice/mutable/short-fn), with `CharRoles::scheme`
+  and `CharRoles::clojure` base tables.
+- `Options::hash_curly_symbol` (Guile): `#{foo bar}#` extended symbols lex as
+  one verbatim symbol token, delimited like a piped symbol (ADR-0016).
+  Mutually exclusive with `set_literal`.
+- `Options::fold_longhand`, `Options::fold_case_insensitive`, and a per-family
+  glyph gate governing when `(quote x)`-style longhand folds into a shorthand
+  `Prefixed` datum (ADR-0002): on for the Scheme/Lisp family, off for
+  Clojure/EDN/Janet/Hy/Fennel; case-insensitive folding (`(QUOTE X)`) for
+  Common Lisp/ISLisp/AutoLISP. Never applies inside a hash literal's inner
+  (data) list.
+- `Options::dotted_pairs_infix` (Racket): tolerates a second dot in a dotted
+  list as Racket's legitimate infix-dot convention (`(dom . -> . rng)`)
+  instead of flagging it.
+- `ErrorKind::DepthLimitExceeded` (a fixed `MAX_DEPTH = 200` recursion cap so
+  `parse` never overflows the stack on pathologically nested input; ADR-0004,
+  ADR-0028) and `ErrorKind::ItemAfterDottedTail` (items after a dotted tail,
+  or a second dot, are kept rather than silently scrambling the list).
+- `DatumKind::Prefixed` gained `arg: Option<Box<Datum>>`, retaining the
+  metadata form for `Meta` (`^meta target`) and the feature test for
+  `FeatureConditional` (`#+sbcl form`) instead of discarding them (ADR-0010).
 
 ### Changed
 
@@ -40,6 +77,48 @@ Implements seven lisplens-driven feature requests (ADR-0020..0026): polyglot def
   (`CharSet` / `BracketString` / `None`) instead of the separate `bracket_string`
   flag, making the competing `#[` meanings mutually exclusive by type.
 - Annotator correctness (audit): `defmethod`/`cl-defmethod` docstrings are tagged; `ert-deftest` carries its mandatory `()` arglist; the harvester no longer turns a `&rest args` parameter into a fixed `Arglist` slot; a Name must be a symbol or `(setf foo)` (anonymous Fennel `fn` / decorated Hy `defn` no longer mis-annotate); Clojure `defmulti`/`def`/`defprotocol`/`ns` docstrings are recognized and `deftype` is Kind-only.
+- **Breaking:** `Prefix::ReaderConditional(bool)` is split into
+  `Prefix::FeatureConditional { include }` (CL/elisp `#+`/`#-`) and
+  `Prefix::ReaderConditional { splicing }` (Clojure `#?`/`#?@`) — the bool
+  previously conflated two different constructs behind one shape (ADR-0002,
+  ADR-0026).
+- **Breaking:** `DatumKind::Prefixed` gained an `arg: Option<Box<Datum>>`
+  field (see Added); any exhaustive match/construction of `Prefixed` needs
+  updating.
+- **Breaking:** `TokenKind::Error` is replaced by
+  `TokenKind::Unterminated(UnterminatedKind)` (see Added).
+- **Breaking:** `Lexer<'a>` is now `Lexer<'a, 'o>`, decoupling the source
+  lifetime from the `&Options` borrow — mirrors `Parser<'a, 'o>` so a
+  temporary `&Options` no longer pins the Lexer's lifetime to the call site.
+- **Breaking:** nine scattered prefix-glyph `Options` fields
+  (`quote`/`quasiquote`/`unquote`/`splicing_suffix`/`deref`/`meta`/`splice`/
+  `mutable`/`short_fn`) are grouped into `Options::roles: CharRoles` (ADR-0016).
+- **Breaking:** `reader::read_all` is removed — it returned a concrete
+  `std::vec::IntoIter` and silently discarded diagnostics, which the
+  fault-tolerant reader is built around surfacing; use `parse(...).data`.
+- **Breaking:** longhand folding is now dialect-gated (see Added) —
+  `(quote x)` no longer folds in Clojure/EDN/Janet/Hy/Fennel, and
+  `(QUOTE x)` now folds in Common Lisp (case-insensitively), where it
+  previously did not.
+- Recovery behavior changes (ADR-0004): a depth cap bounds recursion
+  (`ErrorKind::DepthLimitExceeded`); a dangling prefix/discard (`#;`/`'`/…)
+  no longer silently drops the rest of the file; an unterminated string
+  backtracks to the next line-start `(` so following code is recovered
+  instead of lost; items after a dotted tail are kept and flagged
+  (`ErrorKind::ItemAfterDottedTail`) instead of silently scrambling the list
+  (except under `Options::dotted_pairs_infix`, e.g. Racket).
+- `#t`/`#f`/`#true`/`#false` now require a terminator (delimiter/whitespace/
+  EOF) before being read as booleans; `#thing` and SRFI-4 `#f64(...)` no
+  longer misparse as `Bool` + a stray atom/list.
+- An unrecognized `#tag(` now lexes as a single `HashOpen` token covering the
+  whole `#tag(`, producing one `HashLiteral { tag, inner }` instead of a
+  split `Symbol` + `List` (ADR-0011); radix `#Nr...` numbers classify as
+  `Number`.
+- `1+`/`1-` (and similar) are now `Symbol`s, not misclassified as numbers;
+  number classification is lexical-shape-only with a `Symbol` fallback for
+  ambiguity.
+- Emacs Lisp modifier-chain char literals (`?\C-\M-x`) now lex as one
+  character token instead of splitting into a char plus a stray atom.
 
 ## [0.1.1] - 2026-07-02
 

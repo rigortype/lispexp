@@ -87,13 +87,25 @@ pub enum HashBracket {
 ///
 /// Grouped separately from [`Options`] because these fields are exactly the
 /// glyph-to-role assignments a dialect makes for its prefix syntax — a
-/// cohesive table, not a grab-bag of independent toggles. Build from a base
-/// preset such as [`CharRoles::scheme`] or [`CharRoles::clojure`] and override
-/// individual glyphs (`CharRoles { unquote: Some('~'), ..CharRoles::scheme()
-/// }`).
+/// cohesive table, not a grab-bag of independent toggles. Presets are built
+/// from a base preset such as [`CharRoles::scheme`] or [`CharRoles::clojure`]
+/// using struct-update syntax internally (`CharRoles { unquote: Some('~'),
+/// ..CharRoles::scheme() }`) — that works because the composing code lives
+/// inside this crate.
 ///
 /// `#[non_exhaustive]`: adding a new prefix role's glyph field is not a
-/// breaking change.
+/// breaking change, but it also means **external** crates cannot use
+/// struct-expression syntax on `CharRoles` at all (`..` functional-record
+/// update included — it still names every field, which `#[non_exhaustive]`
+/// forbids across crates). From outside this crate, start from a preset and
+/// mutate the fields you need:
+///
+/// ```
+/// use lispexp::Options;
+///
+/// let mut opts = Options::scheme();
+/// opts.roles.unquote = Some('~');
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct CharRoles {
@@ -281,9 +293,23 @@ impl std::str::FromStr for Dialect {
 /// Reader/lexer configuration. Construct via a preset such as
 /// [`Options::scheme`] or [`Options::clojure`], then adjust fields if needed.
 ///
-/// `#[non_exhaustive]`: build from a preset and tweak fields (`Options {
-/// square: DelimRole::List, ..Options::scheme() }`) rather than naming every
-/// field, so adding a syntax toggle is not a breaking change.
+/// `#[non_exhaustive]`: the presets below build one preset from another with
+/// struct-update syntax (`Options { square: DelimRole::List, ..Options::scheme()
+/// }`) — that works internally because the composing code lives inside this
+/// crate. **External** crates cannot use struct-expression syntax on
+/// `Options` at all, including `..` functional-record update — a
+/// `#[non_exhaustive]` type forbids naming its fields in a struct expression
+/// from outside its defining crate (`E0639`), even with `..` filling in the
+/// rest. From outside this crate, start from a preset and mutate the fields
+/// you need:
+///
+/// ```
+/// use lispexp::{DelimRole, Options};
+///
+/// let mut opts = Options::scheme();
+/// opts.square = DelimRole::List;
+/// opts.roles.unquote = Some('~');
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Options {
@@ -369,7 +395,7 @@ pub struct Options {
     /// the Scheme/Lisp family where quote is reader syntax; false for
     /// Clojure/EDN/Janet/Hy/Fennel, whose longhand spellings differ or where
     /// quote is not reader syntax. A per-family glyph gate applies on top:
-    /// `quote` folds only if [`Self::quote`] is set, etc.
+    /// `quote` folds only if [`CharRoles::quote`] is set, etc.
     pub fold_longhand: bool,
     /// Whether the longhand fold matches the head symbol case-insensitively
     /// (`(QUOTE X)` is `quote`). True for the case-insensitive readers
