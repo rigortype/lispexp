@@ -66,7 +66,9 @@
 //! Built on the tree, each opt-in and reader-only:
 //!
 //! - [`walk`] — a pruning visitor that classifies each node as [`Class::Code`]
-//!   or [`Class::Data`], so a tool descends into code and skips quoted data
+//!   or [`Class::Data`], so a tool descends into code and skips quoted data;
+//!   [`walk_regions`] refines `Data` into prunable [`Region::SealedData`] vs.
+//!   porous [`Region::PorousData`] so a `Skip` never drops quasiquoted code
 //!   (ADR-0026).
 //! - [`annotate`] — tags definition forms (name, arglist, docstring, body,
 //!   method dispatch) across dialects, from a bundled per-dialect core plus a
@@ -103,4 +105,4 @@ pub use options::{
 pub use reader::{parse, parse_form_at, FormAt, Parsed};
 pub use span::Span;
 pub use token::{Token, TokenKind, UnterminatedKind};
-pub use walk::{walk, Class, Walk};
+pub use walk::{walk, walk_regions, Class, Region, Walk};
