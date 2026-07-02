@@ -166,38 +166,73 @@ impl CharRoles {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Dialect {
-    /// R7RS-small Scheme.
+    // --- Scheme family: R7RS-small and the implementations that widen it ---
+    /// Scheme — lispexp's Scheme reader tracks the latest *small* Scheme
+    /// standard, currently **R7RS-small**, and is the base the other Scheme
+    /// variants below build on. There is deliberately no per-standard variant:
+    /// earlier RnRS code (R4RS/R5RS) is read as a subset, R6RS's distinct
+    /// `#vu8(…)` bytevectors are covered too, and version *conformance* is a
+    /// semantic concern beyond this reader (ADR-0001). A future R8RS-small
+    /// would update this baseline rather than add a variant (ADR-0029).
     Scheme,
-    /// Clojure.
+    /// GNU Guile — a Scheme implementation and the official extension language
+    /// of the GNU Project (embedded in GNU Guix, GNU LilyPond, GDB, and more).
+    /// Widens the Scheme base with `#:foo` keywords, `#'` syntax quoting, and
+    /// `#{…}#` extended symbols.
+    Guile,
+    /// Racket — a Scheme-descended language and language-oriented programming
+    /// platform. Widens the Scheme base with `#lang` lines, `[]`/`{}` as
+    /// ordinary lists, and the infix dot `(a . b . c)`.
+    Racket,
+    /// Gauche — a practical, widely-used Scheme implementation whose files use
+    /// the `.scm` extension. Read through the shared tolerant
+    /// [`Options::scheme_superset`] reader (see [`Dialect::SchemeSuperset`]),
+    /// not a bespoke preset.
+    Gauche,
+    /// Mosh — an R6RS Scheme implementation (`.scm`). Read through the shared
+    /// [`Options::scheme_superset`] reader (see [`Dialect::SchemeSuperset`]).
+    Mosh,
+    /// Gambit — a Scheme implementation (Gambit-C, `.scm`). Read through the
+    /// shared [`Options::scheme_superset`] reader (see [`Dialect::SchemeSuperset`]).
+    Gambit,
+    /// A tolerant `.scm` "Scheme superset" — R7RS-small widened with the
+    /// non-conflicting reader extensions shared by the `.scm`-using
+    /// implementations ([`Gauche`](Dialect::Gauche), [`Mosh`](Dialect::Mosh),
+    /// and [`Gambit`](Dialect::Gambit), which all select this same reader).
+    /// See [`Options::scheme_superset`].
+    SchemeSuperset,
+
+    // --- Clojure family ---
+    /// Clojure — a Lisp hosted on the Java Virtual Machine.
     Clojure,
+    /// Phel — a Clojure-like Lisp that compiles to PHP.
+    Phel,
+    /// EDN (Extensible Data Notation) — Clojure's data notation, its data-only
+    /// subset with the code-only reader syntax removed.
+    Edn,
+
+    // --- Other Lisps ---
     /// ANSI Common Lisp.
     CommonLisp,
-    /// Emacs Lisp.
+    /// Emacs Lisp — the extension language of the GNU Emacs editor. The same
+    /// reader also covers the Emacs Lisp *Data* format (`lisp-data-mode`,
+    /// `.eld`): Emacs reads code and data with one `read`, so there is no
+    /// restricted data-only variant (unlike [`Edn`](Dialect::Edn) for Clojure)
+    /// — `'x`, `#'fn`, `#[…]`, and `#s(…)` are all valid readable data here
+    /// (ADR-0029).
     EmacsLisp,
-    /// Racket.
-    Racket,
-    /// Janet.
-    Janet,
-    /// Hy.
-    Hy,
-    /// AutoLISP.
-    AutoLisp,
-    /// Guile Scheme.
-    Guile,
-    /// Phel.
-    Phel,
-    /// Fennel.
-    Fennel,
-    /// LFE (Lisp Flavoured Erlang).
-    Lfe,
-    /// ISLisp.
+    /// ISLisp — the ISO-standardized Lisp (ISO/IEC 13816).
     Islisp,
-    /// A tolerant `.scm` "Scheme superset" — R7RS-small widened with the
-    /// non-conflicting reader extensions of the `.scm`-using implementations
-    /// (Gauche, Mosh, Gambit). See [`Options::scheme_superset`].
-    SchemeSuperset,
-    /// EDN (a data-only subset of Clojure).
-    Edn,
+    /// AutoLISP — the scripting dialect embedded in Autodesk AutoCAD.
+    AutoLisp,
+    /// Janet — a small, embeddable functional Lisp.
+    Janet,
+    /// Hy — a Lisp that compiles to Python.
+    Hy,
+    /// Fennel — a Lisp that compiles to Lua.
+    Fennel,
+    /// LFE (Lisp Flavoured Erlang) — a Lisp on the Erlang VM (BEAM).
+    Lfe,
 }
 
 impl Dialect {
@@ -209,21 +244,27 @@ impl Dialect {
     /// dialect this version of lispexp knows about," not a permanently fixed
     /// set.
     pub const ALL: &'static [Dialect] = &[
+        // Scheme family
         Dialect::Scheme,
+        Dialect::Guile,
+        Dialect::Racket,
+        Dialect::Gauche,
+        Dialect::Mosh,
+        Dialect::Gambit,
+        Dialect::SchemeSuperset,
+        // Clojure family
         Dialect::Clojure,
+        Dialect::Phel,
+        Dialect::Edn,
+        // Other Lisps
         Dialect::CommonLisp,
         Dialect::EmacsLisp,
-        Dialect::Racket,
+        Dialect::Islisp,
+        Dialect::AutoLisp,
         Dialect::Janet,
         Dialect::Hy,
-        Dialect::AutoLisp,
-        Dialect::Guile,
-        Dialect::Phel,
         Dialect::Fennel,
         Dialect::Lfe,
-        Dialect::Islisp,
-        Dialect::SchemeSuperset,
-        Dialect::Edn,
     ];
 
     /// The preset [`Options`] for this dialect — sugar for
@@ -240,20 +281,23 @@ impl std::fmt::Display for Dialect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
             Dialect::Scheme => "scheme",
+            Dialect::Guile => "guile",
+            Dialect::Racket => "racket",
+            Dialect::Gauche => "gauche",
+            Dialect::Mosh => "mosh",
+            Dialect::Gambit => "gambit",
+            Dialect::SchemeSuperset => "scheme-superset",
             Dialect::Clojure => "clojure",
+            Dialect::Phel => "phel",
+            Dialect::Edn => "edn",
             Dialect::CommonLisp => "common-lisp",
             Dialect::EmacsLisp => "emacs-lisp",
-            Dialect::Racket => "racket",
+            Dialect::Islisp => "islisp",
+            Dialect::AutoLisp => "autolisp",
             Dialect::Janet => "janet",
             Dialect::Hy => "hy",
-            Dialect::AutoLisp => "autolisp",
-            Dialect::Guile => "guile",
-            Dialect::Phel => "phel",
             Dialect::Fennel => "fennel",
             Dialect::Lfe => "lfe",
-            Dialect::Islisp => "islisp",
-            Dialect::SchemeSuperset => "scheme-superset",
-            Dialect::Edn => "edn",
         };
         f.write_str(name)
     }
@@ -417,7 +461,9 @@ pub struct Options {
 }
 
 impl Options {
-    /// R7RS-small Scheme (the first implemented dialect).
+    /// Scheme, tracking the latest small Scheme standard — currently
+    /// **R7RS-small** (the first implemented dialect). Earlier RnRS code reads
+    /// as a subset; see [`Dialect::Scheme`] for the version-tracking policy.
     #[must_use]
     pub fn scheme() -> Self {
         Options {
@@ -560,7 +606,10 @@ impl Options {
         }
     }
 
-    /// Emacs Lisp.
+    /// Emacs Lisp. Also the reader for the Emacs Lisp Data format
+    /// (`lisp-data-mode`, `.eld` files): Emacs uses one `read` for code and
+    /// data, so the data format needs no separate preset — "everything is
+    /// data" is a semantic stance, not a lexical restriction (ADR-0001).
     #[must_use]
     pub fn emacs_lisp() -> Self {
         Options {
@@ -847,20 +896,24 @@ impl Options {
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
             Dialect::Scheme => Options::scheme(),
+            Dialect::Guile => Options::guile(),
+            Dialect::Racket => Options::racket(),
+            // Gauche/Mosh/Gambit are named entry points to the one shared
+            // tolerant `.scm` reader (ADR-0027); they are not distinct presets.
+            Dialect::Gauche | Dialect::Mosh | Dialect::Gambit | Dialect::SchemeSuperset => {
+                Options::scheme_superset()
+            }
             Dialect::Clojure => Options::clojure(),
+            Dialect::Phel => Options::phel(),
+            Dialect::Edn => Options::edn(),
             Dialect::CommonLisp => Options::common_lisp(),
             Dialect::EmacsLisp => Options::emacs_lisp(),
-            Dialect::Racket => Options::racket(),
+            Dialect::Islisp => Options::islisp(),
+            Dialect::AutoLisp => Options::autolisp(),
             Dialect::Janet => Options::janet(),
             Dialect::Hy => Options::hy(),
-            Dialect::AutoLisp => Options::autolisp(),
-            Dialect::Guile => Options::guile(),
-            Dialect::Phel => Options::phel(),
             Dialect::Fennel => Options::fennel(),
             Dialect::Lfe => Options::lfe(),
-            Dialect::Islisp => Options::islisp(),
-            Dialect::SchemeSuperset => Options::scheme_superset(),
-            Dialect::Edn => Options::edn(),
         }
     }
 }

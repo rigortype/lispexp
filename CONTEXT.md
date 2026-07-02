@@ -9,10 +9,14 @@ A single parsed unit of S-expression syntax — a list, symbol, number, string, 
 _Avoid_: node, expression, form
 
 **Dialect**:
-One of the named presets of Options that bundle the individually-toggleable syntax settings lispexp can read. A Dialect is a convenience constructor, not a separate code path — the underlying Reader and Options are shared across all dialects. A Dialect may build on another's preset rather than starting from scratch (e.g. Racket layers onto the Scheme preset; Phel layers onto the Clojure preset).
+One of the named presets of Options that bundle the individually-toggleable syntax settings lispexp can read. A Dialect is a convenience constructor, not a separate code path — the underlying Reader and Options are shared across all dialects. A Dialect may build on another's preset rather than starting from scratch (e.g. Racket layers onto the Scheme preset; Phel layers onto the Clojure preset). Dialects group into **families** that share a base reader — the Scheme family (Scheme, Guile, Racket, Gauche, Mosh, Gambit, Scheme superset) and the Clojure family (Clojure, Phel, EDN). A Dialect names a **reader surface**, not a pinned standard version: `Scheme` tracks the latest *small* Scheme standard (currently R7RS-small) and reads earlier RnRS as a subset, so lispexp adds no per-version Dialect (ADR-0029). Some Dialects are **aliases** that resolve to a shared reader rather than a distinct preset — Gauche, Mosh, and Gambit all select the Scheme superset — a named entry point, not a separate code path.
 _Avoid_: language
 
-EDN is a Dialect too, but a **data-only** one: its preset layers on Clojure with the code-only reader syntax (`#(`, `#'`, `#?`, `#"…"`, `@`) turned off, since EDN is Clojure's data subset (ADR-0025).
+EDN is a Dialect too, but a **data-only** one: its preset layers on Clojure with the code-only reader syntax (`#(`, `#'`, `#?`, `#"…"`, `@`, and the quote family `'`/`` ` ``/`~`/`^`) turned off, since EDN's `clojure.edn` reader is a genuinely *restricted* data reader (ADR-0025). A data format earns its own preset only when the language defines such a restricted reader. Emacs Lisp Data (`lisp-data-mode`, `.eld`) does *not*: Emacs reads code and data with one reader, so `.eld` reuses the Emacs Lisp preset unchanged — "everything is data" there is a semantic stance, not a lexical restriction (ADR-0029).
+
+**Scheme superset**:
+The tolerant `.scm` reader (`Options::scheme_superset`, `Dialect::SchemeSuperset`) that widens R7RS-small with the non-conflicting reader extensions shared by the `.scm`-using implementations — Gauche `#[…]` char-sets and `#/…/` regexps (opaque string leaves), `#"…"` interpolated strings, `#vu8(…)` bytevectors, and both leading-colon `:foo` and trailing-colon `foo:` keywords. A strict *widening*: it only affects input strict `Scheme` would reject or mis-split, never reclassifying valid R7RS. Gauche, Mosh, and Gambit are aliases for it (ADR-0027, ADR-0029).
+_Avoid_: dialect inference (lispexp never detects a dialect across files; the superset is one per-file reader)
 
 **Options**:
 The orthogonal, individually-toggleable syntax settings a Reader is configured with (e.g. delimiter meaning, string/char syntax, keyword syntax, block-comment delimiters and nesting) — the mechanism Dialect support is built from, modeled after `lexpr`'s `Options` builder.

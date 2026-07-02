@@ -87,3 +87,31 @@ fn dialect_options_matches_for_dialect() {
         Options::for_dialect(Dialect::Janet)
     );
 }
+
+#[test]
+fn scheme_variant_dialects_resolve_to_the_shared_superset() {
+    // Gauche/Mosh/Gambit are named entry points to the one shared tolerant
+    // .scm reader — they select the same Options as SchemeSuperset (ADR-0027).
+    let superset = Options::for_dialect(Dialect::SchemeSuperset);
+    for d in [Dialect::Gauche, Dialect::Mosh, Dialect::Gambit] {
+        assert_eq!(
+            Options::for_dialect(d),
+            superset,
+            "{d:?} should resolve to the shared scheme_superset reader"
+        );
+        assert_eq!(d.options(), superset);
+    }
+}
+
+#[test]
+fn scheme_variant_dialects_round_trip_by_name() {
+    use std::str::FromStr;
+    assert_eq!(Dialect::from_str("gauche").unwrap(), Dialect::Gauche);
+    assert_eq!(Dialect::from_str("mosh").unwrap(), Dialect::Mosh);
+    assert_eq!(Dialect::from_str("gambit").unwrap(), Dialect::Gambit);
+    assert_eq!(Dialect::Gauche.to_string(), "gauche");
+    // They are listed in ALL so consumers can enumerate them.
+    for d in [Dialect::Gauche, Dialect::Mosh, Dialect::Gambit] {
+        assert!(Dialect::ALL.contains(&d), "{d:?} missing from Dialect::ALL");
+    }
+}
