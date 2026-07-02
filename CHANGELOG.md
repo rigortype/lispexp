@@ -11,10 +11,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `walk_regions(data, visit)` and `Region { Code, SealedData, PorousData }`: a pruning-safe refinement of the code-vs-data walker (ADR-0026 addendum). The binary `Class::Data` hides whether a node is safe to skip — a quasiquote template is `Data`, yet a nested `unquote` inside it is code, so the tempting `if class == Class::Data { Walk::Skip }` idiom silently drops that code. `Region::is_prunable()` is `true` only for `SealedData` (a hard `quote`, a hash literal, or discarded content), so a consumer can `Skip` sealed data while still descending into porous quasiquote templates. `Region::class()` bridges back to the binary view; `walk` is now a thin wrapper over `walk_regions`. Fully backward-compatible — `walk` and `Class` are unchanged.
 
 - `code_nodes(data) -> CodeNodes`: the pre-order `Iterator` adapter ADR-0026 deferred, over just the `Class::Code` nodes of a datum forest. It fixes the common "walk every code node" policy — prune sealed data, descend porous quasiquote templates (so nested unquoted code is reached), yield only code — so a caller gets `Iterator`'s combinators (`filter`/`find`/`take`) with short-circuiting instead of a stateful callback. The visitor stays primary for consumers that need per-node `Skip`/`Stop` control; both route their descent through one internal helper so they can't diverge.
+- `examples/walk_code_nodes.rs`: walks only the code of a snippet with `code_nodes`, listing every operator called while skipping quoted `'(a b c)` data and a quasiquote template's inert parts (but reaching an unquoted form inside it).
 
 ### Changed
 
 - `walk`'s rustdoc example no longer demonstrates `Skip`-on-`Class::Data` (a footgun that only happened to be safe for its sealed example data); it now shows the descend-and-count idiom and points to `walk_regions` for safe pruning.
+- `annotate_tree` now descends via the code-vs-data walker (`code_nodes`) instead of a hand-rolled "recurse into lists only" rule, so its traversal and the walker's classification can't diverge.
+
+### Fixed
+
+- `annotate_tree` no longer misses a definition guarded by a reader/feature conditional (`#+sbcl (defun …)`), wrapped in metadata, or unquoted inside a quasiquote (`` `(… ,(defun …)) ``): the old descent recursed only into `List` children and never into the `Prefixed` wrapper, so any definition reachable only through a prefix in code position was silently dropped. A quoted `'(defun …)` or a quasiquote *template* stays correctly un-annotated (it is inert data).
 
 ## [0.3.0] - 2026-07-02
 

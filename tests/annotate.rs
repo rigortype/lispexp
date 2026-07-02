@@ -592,3 +592,73 @@ fn registry_composes() {
     reg.remove("defun");
     assert!(reg.get("defun").is_none());
 }
+
+// --- Descent follows code-vs-data classification (ADR-0026) ----------------
+
+fn cl_reg() -> Registry {
+    bundled_registry(Dialect::CommonLisp)
+}
+
+fn cl_heads(src: &str) -> Vec<String> {
+    let data = parse(src, &Options::common_lisp()).data;
+    annotate_tree(&data, &cl_reg())
+        .iter()
+        .map(|a| a.head.to_string())
+        .collect()
+}
+
+#[test]
+fn annotates_defun_guarded_by_feature_conditional() {
+    // `#+sbcl (defun …)` is code — the guarded form is evaluated when the
+    // feature matches — so its definition must be reached (previously missed:
+    // the old descent recursed only into lists, never into the `#+` wrapper).
+    let data = parse("#+sbcl (defun only-sbcl () 1)", &Options::common_lisp()).data;
+    let found = annotate_tree(&data, &cl_reg());
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].head, "defun");
+    assert_eq!(
+        found[0].first(Role::Name).unwrap().kind,
+        DatumKind::Symbol("only-sbcl")
+    );
+}
+
+#[test]
+fn does_not_annotate_quoted_definition() {
+    // `'(defun …)` is inert data — a quoted list, never evaluated — so it must
+    // NOT be annotated, even nested inside real code.
+    assert!(
+        cl_heads("(list '(defun fake () 1))").is_empty(),
+        "quoted defun must not annotate"
+    );
+}
+
+#[test]
+fn does_not_annotate_quasiquote_template_definition() {
+    // A `defun` in a quasiquote *template* (not unquoted) is data at that depth
+    // — a macro building code, not a definition itself.
+    assert!(
+        cl_heads("`(progn (defun tmpl () 1))").is_empty(),
+        "template defun must not annotate"
+    );
+}
+
+#[test]
+fn annotates_unquoted_definition_inside_quasiquote() {
+    // ...but an *unquoted* form flips back to code, so it is reached.
+    let data = parse("`(progn ,(defun spliced () 1))", &Options::common_lisp()).data;
+    let found = annotate_tree(&data, &cl_reg());
+    assert_eq!(found.len(), 1);
+    assert_eq!(
+        found[0].first(Role::Name).unwrap().kind,
+        DatumKind::Symbol("spliced")
+    );
+}
+
+#[test]
+fn still_annotates_nested_defs_outer_before_inner() {
+    // Ordinary list descent is unchanged: nested defs found, outer before inner.
+    assert_eq!(
+        cl_heads("(progn (defun outer () (defun inner () 1)) (defmacro m () 2))"),
+        vec!["defun", "defun", "defmacro"]
+    );
+}

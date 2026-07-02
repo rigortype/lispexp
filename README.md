@@ -75,7 +75,7 @@ Every spec carries a confidence/provenance, and the whole layer is best-effort a
 
 ## Documentation
 
-The full API reference is on docs.rs: <https://docs.rs/lispexp/latest/lispexp/>. Runnable examples live in [`examples/`](examples/) — e.g. `cargo run --example find_definitions` (annotate definitions), `--example harvest_project_macros` (teach the annotator a project's own def-macros), `--example dialect_by_extension`, and `--example lex_tokens` (the trivia-keeping token layer). The design is recorded in [`docs/design.md`](docs/design.md), the domain vocabulary in [`CONTEXT.md`](CONTEXT.md), and the decisions behind it in the ADRs under [`docs/adr/`](docs/adr/).
+The full API reference is on docs.rs: <https://docs.rs/lispexp/latest/lispexp/>. Runnable examples live in [`examples/`](examples/) — e.g. `cargo run --example find_definitions` (annotate definitions), `--example walk_code_nodes` (walk only code, skipping quoted data), `--example harvest_project_macros` (teach the annotator a project's own def-macros), `--example dialect_by_extension`, and `--example lex_tokens` (the trivia-keeping token layer). The design is recorded in [`docs/design.md`](docs/design.md), the domain vocabulary in [`CONTEXT.md`](CONTEXT.md), and the decisions behind it in the ADRs under [`docs/adr/`](docs/adr/).
 
 ## Copyright
 
