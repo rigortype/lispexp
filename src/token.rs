@@ -50,6 +50,39 @@ pub enum TokenKind {
     Label,
     /// A datum label reference `#n#`.
     LabelRef,
-    /// A malformed lexeme (e.g. an unterminated string or block comment).
-    Error,
+    /// A lexeme that ran to end-of-input while a multi-character construct was
+    /// still open (e.g. an unterminated string or block comment). Carries the
+    /// specific state the lexer was in at EOF, so a parinfer-style state-machine
+    /// consumer (ADR-0015) does not need to re-derive it from the token's text.
+    Unterminated(UnterminatedKind),
+}
+
+/// The lexical state an [`TokenKind::Unterminated`] token was in when input
+/// ran out.
+///
+/// `#[non_exhaustive]` so new dialect-specific unterminated states can be
+/// added without a breaking change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum UnterminatedKind {
+    /// An unterminated string literal (`"...`).
+    Str,
+    /// An unterminated piped symbol (`|...`) or Guile extended symbol
+    /// (`#{...`) — both are symbol-delimiter pairs (ADR-0016).
+    PipedSymbol,
+    /// An unterminated block comment. Carries the nesting depth still open at
+    /// EOF (1 for a non-nestable comment, since it can only ever be open once).
+    BlockComment {
+        /// The nesting depth still open when input ran out.
+        depth: u32,
+    },
+    /// An unterminated Janet backtick long-string (`` `...``).
+    LongString,
+    /// An unterminated Hy bracket string (`#[DELIM[...`), including the case
+    /// where the opening delimiter itself was never closed with a second `[`.
+    BracketString,
+    /// An unterminated Gauche char-set literal (`#[...`).
+    CharSet,
+    /// An unterminated Gauche/Mosh regexp literal (`#/...` or `` #"..." ``).
+    Regex,
 }

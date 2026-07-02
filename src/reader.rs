@@ -244,7 +244,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                     }
                     continue;
                 }
-                TokenKind::Error => {
+                TokenKind::Unterminated(_) => {
                     self.advance();
                     self.error(
                         t.span,
@@ -386,7 +386,7 @@ impl<'a, 'o> Parser<'a, 'o> {
             | TokenKind::BlockComment
             | TokenKind::LangLine
             | TokenKind::Close(_)
-            | TokenKind::Error => return None,
+            | TokenKind::Unterminated(_) => return None,
         };
         Some(Datum {
             kind,

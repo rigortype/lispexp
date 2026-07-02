@@ -8,23 +8,28 @@
 use crate::datum::{Delim, Prefix};
 use crate::options::{CharSyntax, HashBracket, HashParen, Options};
 use crate::span::Span;
-use crate::token::{Token, TokenKind};
+use crate::token::{Token, TokenKind, UnterminatedKind};
 
 /// Lex `source` under `options`, yielding a token stream that tiles the input.
-pub fn lex<'a>(source: &'a str, options: &'a Options) -> Lexer<'a> {
+pub fn lex<'a, 'o>(source: &'a str, options: &'o Options) -> Lexer<'a, 'o> {
     Lexer::new(source, options)
 }
 
 /// The lexer. Implements [`Iterator`] over [`Token`]s.
-pub struct Lexer<'a> {
+pub struct Lexer<'a, 'o> {
     src: &'a str,
-    opts: &'a Options,
+    opts: &'o Options,
     pos: usize,
 }
 
-impl<'a> Lexer<'a> {
+impl<'a, 'o> Lexer<'a, 'o> {
     /// Create a lexer over `src` configured by `opts`.
-    pub fn new(src: &'a str, opts: &'a Options) -> Self {
+    ///
+    /// `opts` has its own lifetime `'o`, separate from the source `'a` (mirroring
+    /// the reader's `Parser<'a, 'o>`), so a caller's temporary `&Options` (e.g.
+    /// `&Options::scheme()`) stays ergonomic and does not pin the `Lexer`'s
+    /// lifetime to the options value's lifetime.
+    pub fn new(src: &'a str, opts: &'o Options) -> Self {
         Lexer { src, opts, pos: 0 }
     }
 
@@ -236,7 +241,9 @@ impl<'a> Lexer<'a> {
         }
         loop {
             match self.peek() {
-                None => return self.token(TokenKind::Error, start),
+                None => {
+                    return self.token(TokenKind::Unterminated(UnterminatedKind::LongString), start)
+                }
                 Some('`') => {
                     let mut close = 0;
                     while self.peek() == Some('`') {
@@ -263,13 +270,19 @@ impl<'a> Lexer<'a> {
             self.bump();
         }
         if self.peek() != Some('[') {
-            return self.token(TokenKind::Error, start);
+            return self.token(
+                TokenKind::Unterminated(UnterminatedKind::BracketString),
+                start,
+            );
         }
         let closer = format!("]{}]", &self.src[delim_start..self.pos]);
         self.bump(); // second '['
         loop {
             if self.rest().is_empty() {
-                return self.token(TokenKind::Error, start);
+                return self.token(
+                    TokenKind::Unterminated(UnterminatedKind::BracketString),
+                    start,
+                );
             }
             if self.rest().starts_with(&closer) {
                 for _ in 0..closer.chars().count() {
@@ -292,7 +305,9 @@ impl<'a> Lexer<'a> {
         self.bump(); // '['
         loop {
             match self.peek() {
-                None => return self.token(TokenKind::Error, start), // unterminated
+                None => {
+                    return self.token(TokenKind::Unterminated(UnterminatedKind::CharSet), start)
+                }
                 Some(']') => {
                     self.bump();
                     return self.token(TokenKind::Str, start);
@@ -333,7 +348,7 @@ impl<'a> Lexer<'a> {
     fn lex_regex_slash(&mut self, start: usize) -> Token {
         self.bump(); // '/'
         if !self.consume_until_unescaped('/') {
-            return self.token(TokenKind::Error, start); // unterminated
+            return self.token(TokenKind::Unterminated(UnterminatedKind::Regex), start);
         }
         if self.peek() == Some('i') {
             self.bump(); // the sole case-fold flag
@@ -347,8 +362,8 @@ impl<'a> Lexer<'a> {
         if self.consume_until_unescaped('"') {
             return self.token(TokenKind::Str, start);
         }
-        // Unterminated: the scan ran to EOF as one Error token, which would
-        // swallow the rest of the file so the reader can never resync (R5).
+        // Unterminated: the scan ran to EOF as one Unterminated token, which
+        // would swallow the rest of the file so the reader can never resync (R5).
         // Backtrack to just before the first line-start `(` after the opening
         // quote — overwhelmingly the next top-level form, not string content.
         // A legitimately terminated string (even a multiline one holding a
@@ -357,7 +372,7 @@ impl<'a> Lexer<'a> {
         if let Some(cut) = next_line_start_paren(&self.src[content_start..]) {
             self.pos = content_start + cut;
         }
-        self.token(TokenKind::Error, start)
+        self.token(TokenKind::Unterminated(UnterminatedKind::Str), start)
     }
 
     /// Consume characters up to and including the next unescaped `close`, from
@@ -382,7 +397,10 @@ impl<'a> Lexer<'a> {
         if self.consume_until_unescaped('|') {
             self.token(TokenKind::Atom, start)
         } else {
-            self.token(TokenKind::Error, start) // unterminated
+            self.token(
+                TokenKind::Unterminated(UnterminatedKind::PipedSymbol),
+                start,
+            )
         }
     }
 
@@ -453,7 +471,7 @@ impl<'a> Lexer<'a> {
                 if self.consume_until_unescaped('"') {
                     self.token(TokenKind::Str, start) // regex as a string leaf
                 } else {
-                    self.token(TokenKind::Error, start)
+                    self.token(TokenKind::Unterminated(UnterminatedKind::Regex), start)
                 }
             }
             Some('{') if self.opts.hash_curly_symbol => {
@@ -595,12 +613,19 @@ impl<'a> Lexer<'a> {
     /// Lex a Guile `#{foo bar}#` extended symbol (ADR-0016). The `#` is already
     /// consumed; the cursor is at `{`. Scans to the closing `}#` and emits one
     /// verbatim [`TokenKind::Atom`] (delimiters included). Unterminated input
-    /// yields an [`TokenKind::Error`] leaf.
+    /// yields a [`TokenKind::Unterminated`]`(`[`UnterminatedKind::PipedSymbol`]`)`
+    /// leaf — ADR-0016 treats `#{...}#` as just another symbol-delimiter pair
+    /// alongside `|...|`.
     fn lex_hash_curly_symbol(&mut self, start: usize) -> Token {
         self.bump(); // '{'
         loop {
             match self.peek() {
-                None => return self.token(TokenKind::Error, start),
+                None => {
+                    return self.token(
+                        TokenKind::Unterminated(UnterminatedKind::PipedSymbol),
+                        start,
+                    )
+                }
                 Some('}') if self.rest().starts_with("}#") => {
                     self.bump(); // '}'
                     self.bump(); // '#'
@@ -653,10 +678,13 @@ impl<'a> Lexer<'a> {
         for _ in 0..open.chars().count() {
             self.bump();
         }
-        let mut depth = 1usize;
+        let mut depth = 1u32;
         loop {
             if self.rest().is_empty() {
-                return self.token(TokenKind::Error, start); // unterminated
+                return self.token(
+                    TokenKind::Unterminated(UnterminatedKind::BlockComment { depth }),
+                    start,
+                );
             }
             if nestable && self.rest().starts_with(open) {
                 for _ in 0..open.chars().count() {
@@ -786,7 +814,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-impl<'a> Iterator for Lexer<'a> {
+impl<'a, 'o> Iterator for Lexer<'a, 'o> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {

@@ -43,5 +43,5 @@ pub use line_index::LineIndex;
 pub use options::{BlockComment, CharSyntax, DelimRole, Dialect, HashBracket, HashParen, Options};
 pub use reader::{parse, parse_form_at, read_all, FormAt, Parsed};
 pub use span::Span;
-pub use token::{Token, TokenKind};
+pub use token::{Token, TokenKind, UnterminatedKind};
 pub use walk::{walk, Class, Walk};
