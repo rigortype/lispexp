@@ -173,7 +173,7 @@ pub enum Dialect {
     /// earlier RnRS code (R4RS/R5RS) is read as a subset, R6RS's distinct
     /// `#vu8(…)` bytevectors are covered too, and version *conformance* is a
     /// semantic concern beyond this reader (ADR-0001). A future R8RS-small
-    /// would update this baseline rather than add a variant.
+    /// would update this baseline rather than add a variant (ADR-0029).
     Scheme,
     /// GNU Guile — a Scheme implementation and the official extension language
     /// of the GNU Project (embedded in GNU Guix, GNU LilyPond, GDB, and more).
@@ -218,7 +218,8 @@ pub enum Dialect {
     /// reader also covers the Emacs Lisp *Data* format (`lisp-data-mode`,
     /// `.eld`): Emacs reads code and data with one `read`, so there is no
     /// restricted data-only variant (unlike [`Edn`](Dialect::Edn) for Clojure)
-    /// — `'x`, `#'fn`, `#[…]`, and `#s(…)` are all valid readable data here.
+    /// — `'x`, `#'fn`, `#[…]`, and `#s(…)` are all valid readable data here
+    /// (ADR-0029).
     EmacsLisp,
     /// ISLisp — the ISO-standardized Lisp (ISO/IEC 13816).
     Islisp,
