@@ -562,6 +562,34 @@ mod tests {
     }
 
     #[test]
+    fn walk_class_matches_walk_regions_class_for_every_node() {
+        // `walk`'s binary `Class` must equal `walk_regions`' `Region::class()`
+        // node-for-node and in order. `walk` delegates to `walk_regions` today,
+        // so this holds by construction — the test pins the contract so a future
+        // reimplementation of either can't silently diverge (downstream tools
+        // like cccc-scheme rely on `Region::class()` reproducing `Class` exactly).
+        let cases = [
+            (Options::scheme(), "(f x)"),
+            (Options::scheme(), "'(a b)"),
+            (Options::scheme(), "`(a ,b)"),
+            (Options::scheme(), "``(,,c)"),
+            (Options::scheme(), "'(a ,b)"),
+            (Options::scheme(), "#(1 2 3)"),
+            (Options::scheme(), "(let ((x 1)) `(v ,x '(w)))"),
+            (Options::common_lisp(), "'(f #'a #.(g))"),
+            (Options::common_lisp(), "#+sbcl (defun only () 1)"),
+        ];
+        for (opts, src) in &cases {
+            let via_class = classes(src, opts);
+            let via_region: Vec<(&str, Class)> = regions(src, opts)
+                .into_iter()
+                .map(|(t, r)| (t, r.class()))
+                .collect();
+            assert_eq!(via_class, via_region, "mismatch for {src:?}");
+        }
+    }
+
+    #[test]
     fn blanket_skip_on_binary_data_drops_quasiquoted_code() {
         // The footgun: pruning on `Class::Data` skips the porous template whole,
         // so the unquoted `(f y)` — real code — is never seen.
