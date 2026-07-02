@@ -85,9 +85,11 @@ mechanism (`annotate_form`) was already dialect-agnostic and is unchanged.
   analog of elisp `declare`), since an author-supplied `:arglists` is the
   authoritative call shape. This also motivated a robust arglist search (skip a
   leading docstring string and attr-map), which additionally fixes documented
-  Clojure/Janet macros whose docstring precedes the arglist. `:style/indent`
-  remains available for a future body-boundary refinement but names no roles, so
-  it is lower-value than `:arglists`.
+  Clojure/Janet macros whose docstring precedes the arglist. `:style/indent` is
+  also read, as a lower-priority fallback (the analog of elisp `(indent N)`): it
+  names only the body boundary, so an integer `n` pads the leading roles to `n`
+  `Other` slots and opens the body, and `:defn`/`:form` just open the body — but
+  only when `:arglists` did not already pin a richer, role-named shape.
 - Only Emacs Lisp's builtins are bundled from harvesting; other families' bundled
   cores stay hand-authored (ADR-0020), with harvesting reserved for consumers'
   project-local macros.

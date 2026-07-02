@@ -737,14 +737,16 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
         }
     }
 
-    // Refine with Clojure `:arglists` metadata — the authoritative call shape
-    // when an author overrides it (ADR-0032), the direct analog of elisp
-    // `declare`. Look in the `^{…}` name metadata and the attr-map.
+    // Refine with Clojure metadata (ADR-0032) from the `^{…}` name metadata or
+    // the attr-map — the analog of elisp `declare`.
     if profile.clojure_meta {
-        if let Some(arglist) = name_meta
+        // `:arglists` names the authoritative call shape when an author
+        // overrides it — the richest signal.
+        let arglist = name_meta
             .and_then(clojure_arglists)
-            .or_else(|| attr_map.and_then(clojure_arglists))
-        {
+            .or_else(|| attr_map.and_then(clojure_arglists));
+        let mut arglists_applied = false;
+        if let Some(arglist) = arglist {
             let (l, doc, b, matched) = classify_arglist_params(arglist);
             if matched {
                 leading = l;
@@ -752,6 +754,24 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
                 body = b;
                 matched_any = true;
                 declared = true;
+                arglists_applied = true;
+            }
+        }
+        // `:style/indent` names only the body boundary (no roles), so it is a
+        // fallback used when `:arglists` did not already pin the shape.
+        if !arglists_applied {
+            if let Some(indent) = name_meta
+                .and_then(clojure_style_indent)
+                .or_else(|| attr_map.and_then(clojure_style_indent))
+            {
+                if let StyleIndent::Count(n) = indent {
+                    if leading.len() < n {
+                        leading.resize(n, Role::Other);
+                    }
+                }
+                body = true;
+                declared = true;
+                matched_any = true;
             }
         }
     }
@@ -824,10 +844,9 @@ fn classify_arglist_params(params: &[Datum<'_>]) -> (Vec<Role>, bool, bool, bool
     (leading, docstring, body, matched_any)
 }
 
-/// The first arglist vector of a Clojure `:arglists` metadata value, if `meta`
-/// is a `{…}` map carrying one. The value is `'([params…] …)` (a quoted list of
-/// vectors) or a bare list; this returns the params of its first vector.
-fn clojure_arglists<'a, 't>(meta: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
+/// The value for `key` in a Clojure metadata map `{…}` (a flat key/value
+/// sequence), if `meta` is such a map and carries the key.
+fn clojure_meta_value<'a, 't>(meta: &'a Datum<'t>, key: &str) -> Option<&'a Datum<'t>> {
     let DatumKind::List {
         delim: Delim::Curly,
         items,
@@ -836,26 +855,51 @@ fn clojure_arglists<'a, 't>(meta: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
     else {
         return None;
     };
-    // A map is a flat key/value sequence; find the `:arglists` value.
-    let mut value = None;
     for pair in items.chunks(2) {
-        if let [key, val] = pair {
-            if matches!(key.kind, DatumKind::Keyword(":arglists")) {
-                value = Some(val);
-                break;
+        if let [k, v] = pair {
+            if matches!(k.kind, DatumKind::Keyword(kw) if kw == key) {
+                return Some(v);
             }
         }
     }
+    None
+}
+
+/// The first arglist vector of a Clojure `:arglists` metadata value, if `meta`
+/// is a `{…}` map carrying one. The value is `'([params…] …)` (a quoted list of
+/// vectors) or a bare list; this returns the params of its first vector.
+fn clojure_arglists<'a, 't>(meta: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
+    let value = clojure_meta_value(meta, ":arglists")?;
     // Unwrap a leading quote (`'(…)`), then take the first arglist vector.
-    let list = match &value?.kind {
+    let list = match &value.kind {
         DatumKind::Prefixed {
             prefix: Prefix::Quote,
             inner,
             ..
         } => inner.as_ref(),
-        _ => value?,
+        _ => value,
     };
     list.items()?.first()?.items()
+}
+
+/// A Clojure `:style/indent` metadata value's body-boundary meaning (ADR-0032),
+/// the analog of elisp `(indent N)`.
+enum StyleIndent {
+    /// `n` leading distinguished arguments, then a body (integer form).
+    Count(usize),
+    /// Every argument indents as a body (`:defn` / `:form`).
+    Body,
+}
+
+/// The [`StyleIndent`] from a Clojure metadata map's `:style/indent`, if present
+/// and in a form we interpret (an integer or the `:defn`/`:form` keywords). The
+/// nested `[n …]` list form names no roles and is ignored.
+fn clojure_style_indent(meta: &Datum<'_>) -> Option<StyleIndent> {
+    match &clojure_meta_value(meta, ":style/indent")?.kind {
+        DatumKind::Number(n) => n.parse::<usize>().ok().map(StyleIndent::Count),
+        DatumKind::Keyword(":defn" | ":form") => Some(StyleIndent::Body),
+        _ => None,
+    }
 }
 
 /// Harvest a [`FormSpec`] from a `(define-syntax NAME (syntax-rules …))` form

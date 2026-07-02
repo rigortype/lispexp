@@ -295,6 +295,51 @@ fn harvest_clojure_reader_metadata_on_name() {
 }
 
 #[test]
+fn harvest_clojure_style_indent_sets_body_boundary() {
+    // `:style/indent 2` with an opaque `[& args]` vector: two leading
+    // distinguished args, then a body (ADR-0032, the analog of elisp indent).
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(defmacro deffoo {:style/indent 2} [& args] `(do ~@args))",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    let spec = reg.get("deffoo").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Other, Role::Other]);
+    assert!(spec.body);
+    assert_eq!(spec.confidence, Confidence::Declared);
+}
+
+#[test]
+fn harvest_clojure_arglists_wins_over_style_indent() {
+    // When both are present, `:arglists` (which names roles) is authoritative;
+    // `:style/indent` does not pad past it.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(defmacro defbar {:style/indent 3 :arglists '([name & body])} [& args] nil)",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    let spec = reg.get("defbar").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_clojure_style_indent_defn_keyword_is_body() {
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(defmacro defbaz {:style/indent :defn} [& args] nil)",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    let spec = reg.get("defbaz").expect("harvested");
+    assert!(spec.leading.is_empty());
+    assert!(spec.body);
+    assert_eq!(spec.confidence, Confidence::Declared);
+}
+
+#[test]
 fn harvest_fennel_macro_head() {
     // Fennel defines macros with `macro`, not `defmacro` (ADR-0032).
     let mut reg = Registry::new();
