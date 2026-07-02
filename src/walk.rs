@@ -284,25 +284,28 @@ where
         Walk::Stop => return ControlFlow::Break(()),
         Walk::Descend => {}
     }
-    for (child, cctx) in children(datum, ctx) {
-        walk_datum(child, cctx, visit)?;
-    }
-    ControlFlow::Continue(())
+    let mut flow = ControlFlow::Continue(());
+    for_each_child(datum, ctx, |child, cctx| {
+        if flow.is_continue() {
+            flow = walk_datum(child, cctx, visit);
+        }
+    });
+    flow
 }
 
-/// The structural children of `datum`, each paired with the region context it
-/// inherits, in source order. The single place that knows a datum's child shape
-/// and how each prefix shifts the region — both the [`walk_regions`] visitor and
-/// the [`code_nodes`] iterator route their descent through it.
-fn children<'a, 't>(datum: &'a Datum<'t>, ctx: Ctx) -> impl Iterator<Item = (&'a Datum<'t>, Ctx)> {
-    // At most two direct child slots (a list's items+tail, or a prefix's
-    // arg+inner); collect into a small fixed buffer to keep one return type.
-    let mut out: Vec<(&'a Datum<'t>, Ctx)> = Vec::new();
+/// Invoke `f` on each structural child of `datum`, paired with the region
+/// context it inherits, in source order. The single place that knows a datum's
+/// child shape and how each prefix shifts the region — both the [`walk_regions`]
+/// visitor and the [`code_nodes`] iterator route their descent through it. Takes
+/// a callback rather than returning an iterator so neither hot path allocates.
+fn for_each_child<'a, 't>(datum: &'a Datum<'t>, ctx: Ctx, mut f: impl FnMut(&'a Datum<'t>, Ctx)) {
     match &datum.kind {
         DatumKind::List { items, tail, .. } => {
-            out.extend(items.iter().map(|item| (item, ctx)));
+            for item in items {
+                f(item, ctx);
+            }
             if let Some(tail) = tail {
-                out.push((tail, ctx));
+                f(tail, ctx);
             }
         }
         DatumKind::Prefixed {
@@ -311,18 +314,17 @@ fn children<'a, 't>(datum: &'a Datum<'t>, ctx: Ctx) -> impl Iterator<Item = (&'a
             // The auxiliary datum (metadata form / feature test) is inert
             // metadata: visited as data before the inner form.
             if let Some(arg) = arg {
-                out.push((arg, Ctx::DATA));
+                f(arg, Ctx::DATA);
             }
-            out.push((inner, inner_ctx(*prefix, ctx)));
+            f(inner, inner_ctx(*prefix, ctx));
         }
         // A hash literal's content is data; a datum label is transparent.
         DatumKind::HashLiteral {
             inner: Some(inner), ..
-        } => out.push((inner, Ctx::DATA)),
-        DatumKind::Label { inner, .. } => out.push((inner, ctx)),
+        } => f(inner, Ctx::DATA),
+        DatumKind::Label { inner, .. } => f(inner, ctx),
         _ => {}
     }
-    out.into_iter()
 }
 
 /// A pre-order iterator over the [`Class::Code`] nodes of a datum forest,
@@ -352,7 +354,7 @@ impl<'a, 't> Iterator for CodeNodes<'a, 't> {
                 continue;
             }
             let start = self.stack.len();
-            self.stack.extend(children(datum, ctx));
+            for_each_child(datum, ctx, |child, cctx| self.stack.push((child, cctx)));
             self.stack[start..].reverse();
             // Code nodes are yielded; porous templates are only descended.
             if region == Region::Code {
@@ -362,6 +364,10 @@ impl<'a, 't> Iterator for CodeNodes<'a, 't> {
         None
     }
 }
+
+// Once the worklist drains it stays drained, so `next` never yields again after
+// returning `None` — the contract `FusedIterator` lets combinators rely on.
+impl std::iter::FusedIterator for CodeNodes<'_, '_> {}
 
 /// Iterate the [`Class::Code`] nodes of `data` in pre-order — the read-only,
 /// fixed-policy counterpart to [`walk`]. It always prunes sealed data and
@@ -628,6 +634,17 @@ mod tests {
         assert!(got.contains(&"y"));
         // ...but template data at depth 1 (`a`) is not code, so not yielded.
         assert!(!got.contains(&"a"));
+    }
+
+    #[test]
+    fn code_nodes_is_fused_after_exhaustion() {
+        let s = Options::scheme();
+        let parsed = parse("(f x)", &s);
+        let mut it = code_nodes(&parsed.data);
+        while it.next().is_some() {}
+        // Drained stays drained — the FusedIterator contract.
+        assert!(it.next().is_none());
+        assert!(it.next().is_none());
     }
 
     #[test]
