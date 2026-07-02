@@ -134,7 +134,7 @@ fn harvest_form(source: &str, form: &Datum<'_>, table: &mut IndentTable, replace
     if *delim != Delim::Round {
         return;
     }
-    if let Some(head) = list_head(items) {
+    if let Some(head) = form.head_symbol() {
         harvest_put(source, head, items, table, replaced);
         harvest_declare(source, head, items, table, replaced);
     }
@@ -180,23 +180,21 @@ fn harvest_declare(
     if !(head.starts_with("def") || head.starts_with("cl-def")) {
         return;
     }
-    let Some(name) = items.get(1).and_then(as_symbol) else {
+    let Some(name) = items.get(1).and_then(|d| d.as_symbol()) else {
         return;
     };
     // Find a `(declare …)` among the form's items, then an `(indent SPEC)`.
     for item in &items[2.min(items.len())..] {
-        let Some(decl) = list_head_items(item) else {
+        let Some(decl) = item.items() else {
             continue;
         };
-        if list_head(decl) != Some("declare") {
+        if item.head_symbol() != Some("declare") {
             continue;
         }
         for clause in &decl[1..] {
-            if let Some(cl) = list_head_items(clause) {
-                if list_head(cl) == Some("indent") {
-                    if let Some(spec) = cl.get(1) {
-                        insert_spec(source, name, spec, table, replaced);
-                    }
+            if clause.head_symbol() == Some("indent") {
+                if let Some(spec) = clause.items().and_then(|items| items.get(1)) {
+                    insert_spec(source, name, spec, table, replaced);
                 }
             }
         }
@@ -249,29 +247,9 @@ fn quoted_symbol<'a>(datum: &Datum<'a>) -> Option<&'a str> {
         ..
     } = &datum.kind
     {
-        return as_symbol(inner);
+        return inner.as_symbol();
     }
     None
-}
-
-fn as_symbol<'a>(datum: &Datum<'a>) -> Option<&'a str> {
-    match datum.kind {
-        DatumKind::Symbol(s) => Some(s),
-        _ => None,
-    }
-}
-
-/// The items of `datum` if it is a list.
-fn list_head_items<'a, 'd>(datum: &'d Datum<'a>) -> Option<&'d [Datum<'a>]> {
-    match &datum.kind {
-        DatumKind::List { items, .. } => Some(items),
-        _ => None,
-    }
-}
-
-/// The head symbol of a list's items.
-fn list_head<'a>(items: &[Datum<'a>]) -> Option<&'a str> {
-    items.first().and_then(as_symbol)
 }
 
 #[cfg(test)]

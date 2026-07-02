@@ -1,6 +1,6 @@
 //! Reader (datum-tree) tests for the Scheme dialect.
 
-use lispexp::{parse, Datum, DatumKind, Delim, Notation, Options, Prefix};
+use lispexp::{parse, Datum, DatumKind, Delim, Dialect, Notation, Options, Prefix};
 
 fn scheme(src: &str) -> Vec<Datum<'_>> {
     let parsed = parse(src, &Options::scheme());
@@ -307,4 +307,47 @@ fn digit_led_symbols_are_symbols() {
     assert_eq!(*kinds[6], DatumKind::Number("1e-5"));
     assert_eq!(*kinds[7], DatumKind::Number(".5"));
     assert_eq!(*kinds[8], DatumKind::Number("#xFF"));
+}
+
+#[test]
+fn datum_accessors() {
+    let data = scheme(r#"foo :kw 42 "s" #\a (define (f x) x)"#);
+    assert_eq!(data[0].as_symbol(), Some("foo"));
+    assert_eq!(data[0].as_keyword(), None);
+
+    // Scheme has no reader-level keyword syntax; `:kw` reads as a symbol.
+    assert_eq!(data[1].as_symbol(), Some(":kw"));
+
+    assert_eq!(data[2].as_number(), Some("42"));
+    assert_eq!(data[2].as_symbol(), None);
+
+    assert_eq!(data[3].as_str(), Some("\"s\""));
+    assert_eq!(data[4].as_char(), Some("#\\a"));
+
+    let define = &data[5];
+    assert_eq!(define.head_symbol(), Some("define"));
+    let items = define.items().expect("list has items");
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].as_symbol(), Some("define"));
+
+    // Non-list data have no items/head_symbol.
+    assert_eq!(data[0].items(), None);
+    assert_eq!(data[0].head_symbol(), None);
+}
+
+#[test]
+fn as_keyword_on_a_dialect_with_keywords() {
+    let parsed = parse(":foo", &Options::for_dialect(Dialect::Clojure));
+    assert!(parsed.errors.is_empty());
+    assert_eq!(parsed.data[0].as_keyword(), Some(":foo"));
+    assert_eq!(parsed.data[0].as_symbol(), None);
+}
+
+#[test]
+fn datum_text_sugar() {
+    let source = "(+ 1 2)";
+    let data = scheme(source);
+    assert_eq!(data[0].text(source), "(+ 1 2)");
+    let items = data[0].items().unwrap();
+    assert_eq!(items[0].text(source), "+");
 }

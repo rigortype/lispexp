@@ -14,12 +14,12 @@
 //! # Example
 //!
 //! ```
-//! use lispexp::{parse, DatumKind, Options};
+//! use lispexp::{parse, Options};
 //!
 //! let parsed = parse("(define (square x) (* x x))", &Options::scheme());
 //! assert!(parsed.errors.is_empty());
-//! let DatumKind::List { items, .. } = &parsed.data[0].kind else { unreachable!() };
-//! assert_eq!(items[0].kind, DatumKind::Symbol("define"));
+//! assert_eq!(parsed.data[0].head_symbol(), Some("define"));
+//! assert_eq!(parsed.data[0].items().unwrap().len(), 3);
 //! ```
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

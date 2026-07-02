@@ -381,14 +381,9 @@ fn is_delimited_list(datum: &Datum<'_>) -> bool {
 
 /// The head symbol of a round/square list, if the first item is a symbol.
 fn list_head<'a, 't>(datum: &'a Datum<'t>) -> Option<(&'t str, &'a [Datum<'t>])> {
-    if let DatumKind::List { items, .. } = &datum.kind {
-        if let Some(first) = items.first() {
-            if let DatumKind::Symbol(s) = first.kind {
-                return Some((s, items));
-            }
-        }
-    }
-    None
+    let items = datum.items()?;
+    let head = datum.head_symbol()?;
+    Some((head, items))
 }
 
 /// Annotate a single form if its head is a known definition form.

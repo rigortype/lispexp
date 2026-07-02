@@ -79,6 +79,70 @@ pub enum DatumKind<'a> {
     },
 }
 
+impl<'a> Datum<'a> {
+    /// This datum's symbol text, if it is [`DatumKind::Symbol`].
+    pub fn as_symbol(&self) -> Option<&'a str> {
+        match self.kind {
+            DatumKind::Symbol(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// This datum's keyword text, if it is [`DatumKind::Keyword`].
+    pub fn as_keyword(&self) -> Option<&'a str> {
+        match self.kind {
+            DatumKind::Keyword(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// This datum's raw number text, if it is [`DatumKind::Number`].
+    pub fn as_number(&self) -> Option<&'a str> {
+        match self.kind {
+            DatumKind::Number(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// This datum's raw string text (including the surrounding quotes), if it
+    /// is [`DatumKind::Str`].
+    pub fn as_str(&self) -> Option<&'a str> {
+        match self.kind {
+            DatumKind::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// This datum's raw character-literal text (including its lead form), if
+    /// it is [`DatumKind::Char`].
+    pub fn as_char(&self) -> Option<&'a str> {
+        match self.kind {
+            DatumKind::Char(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// This datum's items, if it is a [`DatumKind::List`] of any delimiter
+    /// shape.
+    pub fn items(&self) -> Option<&[Datum<'a>]> {
+        match &self.kind {
+            DatumKind::List { items, .. } => Some(items),
+            _ => None,
+        }
+    }
+
+    /// The head symbol of this datum's items, if this is a list whose first
+    /// item is a symbol.
+    pub fn head_symbol(&self) -> Option<&'a str> {
+        self.items()?.first()?.as_symbol()
+    }
+
+    /// This datum's source text — sugar for `self.span.text(source)`.
+    pub fn text<'s>(&self, source: &'s str) -> &'s str {
+        self.span.text(source)
+    }
+}
+
 /// Delimiter shape. The reader records shape; the consumer assigns meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Delim {
