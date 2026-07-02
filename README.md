@@ -6,7 +6,7 @@ lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or
 
 ## Features
 
-- **One reader, many dialects.** [Scheme][] ([R<sup>7</sup>RS-small][R7RS], [Guile], [Racket], [Gauche]), [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], [Janet], and [EDN] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
+- **One reader, many dialects.** [Scheme][] ([R<sup>7</sup>RS-small][R7RS], [Guile], [Racket], [Gauche], [Mosh], [Gambit]), [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], [Janet], and [EDN] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
 - **Position-annotated.** Every datum carries a byte span and 1-based start line; a `LineIndex` maps offsets to 1-based (line, byte-column).
 - **Code vs. data aware.** Quote/quasiquote/unquote structure is preserved, and a pruning `walk` classifies each node as `Code` or `Data` so consumers descend into code and skip quoted data.
 - **Fault-tolerant.** Malformed input never panics; the reader returns a partial tree plus structured diagnostics, resynchronizing at the next top-level form, with a bounded recursion depth.
@@ -72,6 +72,8 @@ limitations under the License.
 [R7RS]: https://r7rs.org/
 [chibi-scheme]: https://github.com/ashinn/chibi-scheme
 [Gauche]: https://practical-scheme.net/gauche/
+[Mosh]: https://github.com/higepon/mosh
+[Gambit]: https://gambitscheme.org/
 [Guile]: https://www.gnu.org/software/guile/
 [Racket]: https://racket-lang.org/
 [Common Lisp]: https://common-lisp.net/
