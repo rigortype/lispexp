@@ -70,3 +70,34 @@ correctly, which a boolean flag cannot.
 - Consistent with reader-only scope (ADR-0001) and the reader-macro model
   (ADR-0002/ADR-0016): the walker interprets structure already in the tree, and
   evaluates nothing.
+
+## Addendum (0.4.0): `Region` refines `Data` for the pruning use case
+
+The original decision above justified a binary `Class` with "'discarded' and
+'inert' nodes collapse to `Data` — a code search *prunes them all the same*."
+Field use (a `cccc-scheme` migration to `walk`) showed that premise is **false
+for the one operation the visitor exists to enable — pruning.** The natural
+idiom `if class == Class::Data { Walk::Skip }` silently drops code: a
+**quasiquote template is `Data`, yet a nested `unquote` inside it is code.**
+Skipping on `Data` prunes that code away. The only *correct* binary-`Class`
+usage is "never `Skip` on `Data`, only `Skip` nodes you handled yourself" —
+which forfeits pruning entirely for data, defeating the primitive's purpose.
+
+The classification was never wrong; the binary *did* hide the one bit a pruner
+needs. So, **additively** (the binary `Class` and `walk` are unchanged, so no
+consumer breaks):
+
+- Add `Region { Code, SealedData, PorousData }` and `walk_regions`, the callback
+  variant that reports it. `Region::class()` bridges back to the binary view;
+  `Region::is_prunable()` is `true` only for `SealedData`.
+- **Sealed** = a hard `Quote`, a `HashLiteral`, or `Discard`: nothing inside can
+  become code, so `Skip` is safe. **Porous** = a quasiquote template
+  (depth > 0): inert here, but a matching nested `unquote` re-enters code, so it
+  must be descended into. This is exactly the depth model above, surfaced.
+- `walk` is reimplemented as a thin wrapper over `walk_regions` (one traversal).
+  Its docstring no longer demonstrates `Skip`-on-`Data`; that example was the
+  footgun in miniature and only worked because its data happened to be sealed.
+
+This does not add a third *classification* — "can this be evaluated?" is still
+binary. It adds a third *prunability* answer, which is the distinct question a
+pruning visitor actually poses.

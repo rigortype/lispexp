@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `walk_regions(data, visit)` and `Region { Code, SealedData, PorousData }`: a pruning-safe refinement of the code-vs-data walker (ADR-0026 addendum). The binary `Class::Data` hides whether a node is safe to skip — a quasiquote template is `Data`, yet a nested `unquote` inside it is code, so the tempting `if class == Class::Data { Walk::Skip }` idiom silently drops that code. `Region::is_prunable()` is `true` only for `SealedData` (a hard `quote`, a hash literal, or discarded content), so a consumer can `Skip` sealed data while still descending into porous quasiquote templates. `Region::class()` bridges back to the binary view; `walk` is now a thin wrapper over `walk_regions`. Fully backward-compatible — `walk` and `Class` are unchanged.
+
+### Changed
+
+- `walk`'s rustdoc example no longer demonstrates `Skip`-on-`Class::Data` (a footgun that only happened to be safe for its sealed example data); it now shows the descend-and-count idiom and points to `walk_regions` for safe pruning.
+
 ## [0.3.0] - 2026-07-02
 
 This release carries the definition annotator beyond Emacs Lisp. The spec harvester now learns a project's *own* definition macros in every dialect it can — from an arglist, a Clojure metadata map, or a Scheme macro pattern — the bundled per-dialect registries grow to cover more standard def-forms, and the crate's user-facing documentation is filled out. All changes are backward-compatible.

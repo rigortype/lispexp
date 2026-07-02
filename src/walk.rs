@@ -6,6 +6,30 @@
 //! utility layer over the reader's tree — it interprets structure already
 //! present and evaluates nothing (ADR-0001).
 //!
+//! # Pruning safely: sealed vs. porous data
+//!
+//! The binary [`Class`] hides a distinction that matters the moment a consumer
+//! actually *prunes*: not all `Data` can be skipped without losing code.
+//!
+//! - A hard `quote` (or a hash literal, or discarded content) is **sealed** —
+//!   nothing inside can ever be code, so returning [`Walk::Skip`] on it is a
+//!   safe optimization.
+//! - A **quasiquote template** is `Data` too, but it is **porous**: a matching
+//!   nested `unquote` flips its *contents* back to code (`` `(a ,(f x)) `` — the
+//!   `(f x)` is code). `Skip` here silently drops that code.
+//!
+//! So the tempting idiom `if class == Class::Data { Walk::Skip }` is a
+//! **footgun** — it under-counts every unquoted form inside a quasiquote. Two
+//! ways to stay correct:
+//!
+//! - Prune with [`walk_regions`], which reports a three-way [`Region`]:
+//!   [`Region::is_prunable`] is `true` only for [`Region::SealedData`], so you
+//!   `Skip` sealed data and `Descend` through porous templates.
+//! - Or, with the binary [`walk`], only ever `Skip` a node you have *handled
+//!   yourself*; let every unhandled node `Descend` and trust the walker's own
+//!   depth tracking to reach nested code. Never use `Skip` as a blanket
+//!   data-pruning shortcut.
+//!
 //! The classification criterion is uniformly "can this be evaluated?", driven
 //! by reader-macro nesting:
 //!
@@ -37,12 +61,59 @@ use std::ops::ControlFlow;
 use crate::datum::{Datum, DatumKind, Prefix};
 
 /// Whether a subtree is executable code or inert data (ADR-0026).
+///
+/// This is the *binary* view. It is enough to classify a node, but **not** to
+/// decide whether skipping it is safe: a quasiquote template is `Data` yet can
+/// carry nested code (see [`Region`]). To prune, prefer [`walk_regions`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Class {
     /// Can be evaluated — descend into it for code analysis.
     Code,
     /// Inert data — a search prunes it.
     Data,
+}
+
+/// A refinement of [`Class`] that splits `Data` by whether it is safe to prune
+/// (ADR-0026).
+///
+/// [`walk`]'s binary `Data` collapses two cases a *pruning* consumer must keep
+/// apart. `walk_regions` reports this three-way instead so a [`Walk::Skip`]
+/// never silently drops code:
+///
+/// - [`SealedData`](Region::SealedData) — a hard `quote`, a hash literal, or
+///   discarded content: nothing inside can become code. Safe to `Skip`.
+/// - [`PorousData`](Region::PorousData) — a quasiquote template (depth > 0):
+///   inert *here*, but a matching nested `unquote` re-enters code, so its
+///   children must be walked. `Skip` would drop that code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Region {
+    /// Can be evaluated — descend into it for code analysis.
+    Code,
+    /// Data that can never contain code (hard `quote`, hash literal, discard).
+    /// Safe to prune with [`Walk::Skip`].
+    SealedData,
+    /// A quasiquote template: data at this depth, but a nested `unquote` can
+    /// flip its contents back to code. Must be descended into, not pruned.
+    PorousData,
+}
+
+impl Region {
+    /// The binary [`Class`] for this region: everything but [`Region::Code`] is
+    /// [`Class::Data`].
+    pub fn class(self) -> Class {
+        match self {
+            Region::Code => Class::Code,
+            Region::SealedData | Region::PorousData => Class::Data,
+        }
+    }
+
+    /// Whether returning [`Walk::Skip`] on this node is a safe optimization —
+    /// `true` only for [`Region::SealedData`]. Skipping code or a porous
+    /// quasiquote template would drop nested code.
+    pub fn is_prunable(self) -> bool {
+        matches!(self, Region::SealedData)
+    }
 }
 
 /// What the visitor callback asks the walker to do next.
@@ -77,11 +148,15 @@ impl Ctx {
         qq: 0,
     };
 
-    fn class(self) -> Class {
-        if self.hard_quote || self.qq > 0 {
-            Class::Data
+    /// The region this context establishes. A hard quote seals; a positive
+    /// quasiquote depth is porous; otherwise code.
+    fn region(self) -> Region {
+        if self.hard_quote {
+            Region::SealedData
+        } else if self.qq > 0 {
+            Region::PorousData
         } else {
-            Class::Code
+            Region::Code
         }
     }
 }
@@ -121,12 +196,12 @@ fn inner_ctx(prefix: Prefix, ctx: Ctx) -> Ctx {
     }
 }
 
-/// The class of a datum given the region it occupies. `HashLiteral` and
-/// `LabelRef` are inert data regardless of region.
-fn node_class(datum: &Datum<'_>, ctx: Ctx) -> Class {
+/// The region a datum occupies. `HashLiteral` and `LabelRef` are sealed data
+/// regardless of surrounding region.
+fn node_region(datum: &Datum<'_>, ctx: Ctx) -> Region {
     match &datum.kind {
-        DatumKind::HashLiteral { .. } | DatumKind::LabelRef { .. } => Class::Data,
-        _ => ctx.class(),
+        DatumKind::HashLiteral { .. } | DatumKind::LabelRef { .. } => Region::SealedData,
+        _ => ctx.region(),
     }
 }
 
@@ -135,26 +210,60 @@ fn node_class(datum: &Datum<'_>, ctx: Ctx) -> Class {
 /// are pruned; [`Walk::Descend`] recurses; [`Walk::Stop`] aborts the whole
 /// walk. Top-level data start as [`Class::Code`].
 ///
+/// **Do not use `Skip` to prune on [`Class::Data`].** A quasiquote template is
+/// `Data`, yet a nested `unquote` inside it is code; pruning on `Data` drops
+/// that code (see the module docs on *sealed vs. porous* data). This example
+/// therefore descends through everything and only *counts* code — to prune
+/// safely, reach for [`walk_regions`] and [`Region::is_prunable`].
+///
 /// ```
 /// use lispexp::{parse, walk, Class, Walk, DatumKind, Options};
 ///
-/// // `'(a b)` is quoted data; a code-only pass prunes it.
-/// let parsed = parse("(when x '(a b) (f y))", &Options::scheme());
+/// // A quasiquote whose unquoted `(f y)` is real code, next to quoted data.
+/// let parsed = parse("`(a ,(f y) '(b c))", &Options::scheme());
 /// let mut code_lists = 0;
 /// walk(&parsed.data, |datum, class| {
-///     if class == Class::Data {
-///         return Walk::Skip;
-///     }
-///     if matches!(datum.kind, DatumKind::List { .. }) {
+///     if class == Class::Code && matches!(datum.kind, DatumKind::List { .. }) {
 ///         code_lists += 1;
 ///     }
-///     Walk::Descend
+///     Walk::Descend // never blanket-Skip on Data — it would drop `(f y)`
 /// });
-/// assert_eq!(code_lists, 2); // the `(when …)` and `(f y)` lists, not `(a b)`
+/// assert_eq!(code_lists, 1); // the unquoted `(f y)`, not the quoted `(b c)`
 /// ```
 pub fn walk<'a, 't, F>(data: &'a [Datum<'t>], mut visit: F)
 where
     F: FnMut(&'a Datum<'t>, Class) -> Walk,
+{
+    walk_regions(data, |datum, region| visit(datum, region.class()));
+}
+
+/// Like [`walk`], but the callback receives a three-way [`Region`] instead of
+/// the binary [`Class`], so pruning is safe: [`Region::is_prunable`] tells you
+/// whether [`Walk::Skip`] would lose code.
+///
+/// ```
+/// use lispexp::{parse, walk_regions, Walk, DatumKind, Options};
+///
+/// // Prune sealed data, but still descend into the porous quasiquote template.
+/// let parsed = parse("`(a ,(f y) '(b c))", &Options::scheme());
+/// let mut code_lists = 0;
+/// let mut pruned = 0;
+/// walk_regions(&parsed.data, |datum, region| {
+///     if region.is_prunable() {
+///         pruned += 1;
+///         return Walk::Skip; // safe: '(b c) can never contain code
+///     }
+///     if region == lispexp::Region::Code && matches!(datum.kind, DatumKind::List { .. }) {
+///         code_lists += 1;
+///     }
+///     Walk::Descend
+/// });
+/// assert_eq!(code_lists, 1); // `(f y)` is still reached inside the template
+/// assert_eq!(pruned, 1); // the quoted `'(b c)` subtree was skipped whole
+/// ```
+pub fn walk_regions<'a, 't, F>(data: &'a [Datum<'t>], mut visit: F)
+where
+    F: FnMut(&'a Datum<'t>, Region) -> Walk,
 {
     for datum in data {
         if walk_datum(datum, Ctx::TOP, &mut visit).is_break() {
@@ -165,9 +274,9 @@ where
 
 fn walk_datum<'a, 't, F>(datum: &'a Datum<'t>, ctx: Ctx, visit: &mut F) -> ControlFlow<()>
 where
-    F: FnMut(&'a Datum<'t>, Class) -> Walk,
+    F: FnMut(&'a Datum<'t>, Region) -> Walk,
 {
-    match visit(datum, node_class(datum, ctx)) {
+    match visit(datum, node_region(datum, ctx)) {
         Walk::Skip => return ControlFlow::Continue(()),
         Walk::Stop => return ControlFlow::Break(()),
         Walk::Descend => {}
@@ -330,6 +439,96 @@ mod tests {
         // Nothing after the stop point is visited — not even siblings or the
         // next top-level form.
         assert!(!visited.contains(&"(c d)"));
+        assert!(!visited.contains(&"c"));
+    }
+
+    /// Collect `(source-text, region)` for every visited node, descending all.
+    fn regions<'a>(src: &'a str, opts: &Options) -> Vec<(&'a str, Region)> {
+        let parsed = parse(src, opts);
+        let mut out = Vec::new();
+        walk_regions(&parsed.data, |d, r| {
+            out.push((d.span.text(src), r));
+            Walk::Descend
+        });
+        out
+    }
+
+    fn region_of(src: &str, opts: &Options, needle: &str) -> Region {
+        regions(src, opts)
+            .into_iter()
+            .find(|(t, _)| *t == needle)
+            .unwrap_or_else(|| panic!("{needle:?} not visited in {src:?}"))
+            .1
+    }
+
+    #[test]
+    fn hard_quote_is_sealed_quasiquote_template_is_porous() {
+        let s = Options::scheme();
+        // A hard quote seals: nothing inside can become code.
+        assert_eq!(region_of("'(a b)", &s, "(a b)"), Region::SealedData);
+        // A quasiquote template is data, but porous — an unquote can escape it.
+        assert_eq!(region_of("`(a ,b)", &s, "(a ,b)"), Region::PorousData);
+        // The unquoted form itself is back to code.
+        assert_eq!(region_of("`(a ,b)", &s, "b"), Region::Code);
+        // Hash literals are sealed regardless of surroundings.
+        assert_eq!(region_of("#(1 2 3)", &s, "#(1 2 3)"), Region::SealedData);
+    }
+
+    #[test]
+    fn only_sealed_data_is_prunable() {
+        assert!(Region::SealedData.is_prunable());
+        assert!(!Region::PorousData.is_prunable());
+        assert!(!Region::Code.is_prunable());
+        // The binary bridge collapses both data kinds.
+        assert_eq!(Region::SealedData.class(), Class::Data);
+        assert_eq!(Region::PorousData.class(), Class::Data);
+        assert_eq!(Region::Code.class(), Class::Code);
+    }
+
+    #[test]
+    fn blanket_skip_on_binary_data_drops_quasiquoted_code() {
+        // The footgun: pruning on `Class::Data` skips the porous template whole,
+        // so the unquoted `(f y)` — real code — is never seen.
+        let s = Options::scheme();
+        let src = "`(a ,(f y))";
+        let parsed = parse(src, &s);
+        let mut code_lists = Vec::new();
+        walk(&parsed.data, |d, class| {
+            if class == Class::Data {
+                return Walk::Skip;
+            }
+            if matches!(d.kind, DatumKind::List { .. }) {
+                code_lists.push(d.span.text(src));
+            }
+            Walk::Descend
+        });
+        // Bug reproduced: the unquoted call is lost.
+        assert!(!code_lists.contains(&"(f y)"));
+    }
+
+    #[test]
+    fn region_pruning_keeps_quasiquoted_code_but_prunes_sealed() {
+        // The safe idiom: prune only prunable regions; descend porous templates.
+        let s = Options::scheme();
+        let src = "`(a ,(f y) '(b c))";
+        let parsed = parse(src, &s);
+        let mut code_lists = Vec::new();
+        let mut visited = Vec::new();
+        walk_regions(&parsed.data, |d, region| {
+            visited.push(d.span.text(src));
+            if region.is_prunable() {
+                return Walk::Skip;
+            }
+            if region == Region::Code && matches!(d.kind, DatumKind::List { .. }) {
+                code_lists.push(d.span.text(src));
+            }
+            Walk::Descend
+        });
+        // The unquoted call is reached...
+        assert!(code_lists.contains(&"(f y)"));
+        // ...while the sealed quoted list is pruned (visited once, not descended).
+        assert!(visited.contains(&"(b c)"));
+        assert!(!visited.contains(&"b"));
         assert!(!visited.contains(&"c"));
     }
 

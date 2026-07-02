@@ -1,12 +1,5 @@
 # Scheme dialect triage: Gauche's reader extensions
 
-> **Status: resolved (historical record).** The gap diagnosed here is fixed in
-> the reader itself: `lispexp` 0.2.0 ships `Options::scheme_superset()`
-> (`Dialect::SchemeSuperset`, ADR-0027), which `cccc-scheme` now uses instead of
-> its own shim. The analysis below is kept as the original reasoning record; the
-> resolution and its measured result are in the *Superseded by `lispexp` 0.2.0*
-> section at the end.
-
 `cccc-scheme` targets **R7RS-small** (see the crate's module doc). This note
 records what happens when it meets real-world Scheme code that goes beyond
 that — specifically [Gauche](https://practical-scheme.net/gauche/), a widely
@@ -205,3 +198,45 @@ that `lispexp::walk` (ADR-0026) now provides as a first-class, officially
 `lispexp`'s own considered semantics (including cases like this one) instead
 of maintaining a parallel, potentially-diverging judgment — worth a follow-up,
 but a larger change than adopting 0.2.0 itself.
+
+## Follow-up done: migrated to `lispexp::walk` (0.3.0)
+
+`cccc-scheme` now depends on `lispexp` 0.3 (backward-compatible; no reader
+behavior changed) and `Builder::lower_datum` — the single entry point every
+other lowering function recurses through — now calls `lispexp::walk` directly
+instead of hand-rolled `lower_prefixed`/`lower_quasi` functions (both
+deleted). For each `Datum`, `walk` classifies every node as `Class::Code` or
+`Class::Data`; `lower_datum`'s callback hands each `Code`-classified `List` to
+the existing `lower_list` (unchanged — all the special-form/complexity-scoring
+knowledge stays cccc-scheme's own) and returns `Walk::Skip` so `walk` doesn't
+also auto-descend into elements `lower_list` already visits itself, on its own
+structured terms (predicate vs. `then` vs. `alternate`, scored differently).
+Every other node — any `Class::Data`, or a `Code`-classified non-list —
+returns `Walk::Descend`.
+
+**A real bug in the first draft of this migration, caught by testing before
+landing:** the natural-seeming `if class == Class::Data { return Walk::Skip }`
+short-circuit is *wrong*. `Skip` prunes the walker from ever looking inside
+that node — correct for an absolute `Quote` region, but not for a quasiquote
+template, which is `Data` yet can carry a deeper `unquote` that flips its
+*contents* back to `Code`. Short-circuiting on `Data` silently made every
+quasiquote template opaque, undercounting any code nested inside one. The fix
+is to *never* prune on `Data` — only ever `Skip` after successfully handling a
+`Code`-classified `List` via `lower_list`; everything else always `Descend`,
+trusting `walk`'s own depth tracking to correctly stop at true leaves.
+
+This also fixed a **latent bug in the old hand-rolled code**, not just
+matched it: `lower_quasi`'s recursion didn't track quasiquote *depth* — it
+treated any `Unquote` as an immediate escape to code, so a single unquote
+under a *doubly*-nested quasiquote (`` `(a `(b ,(f x))) ``) was wrongly scored
+as code, when Scheme semantics (and `lispexp`'s own depth-counting `Ctx`) say
+it's still data — reaching real code there needs a *second*, stacked unquote
+(`` `(a `(b ,,(f x))) ``). Added
+`nested_quasiquote_needs_matching_unquote_depth_to_reach_code`, which fails
+under the old logic and passes under `walk`.
+
+Re-running the full corpus audit (chibi-scheme/lem/typed-racket/Gauche) after
+the migration reproduces the exact same numbers as the pre-migration 0.2.0
+run — the double-unquote fix doesn't happen to be exercised by any of these
+real files, so this is a from-first-principles correctness fix confirmed by a
+targeted test, not something the audit corpora could have caught on their own.
