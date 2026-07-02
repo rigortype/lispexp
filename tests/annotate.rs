@@ -326,6 +326,21 @@ fn harvest_clojure_arglists_wins_over_style_indent() {
 }
 
 #[test]
+fn harvest_clojure_style_indent_nested_list_uses_head() {
+    // The nested `[n …]` form: the head element `2` is the form-level indent
+    // (ADR-0032). Written as a Clojure vector.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(defmacro defnested {:style/indent [2 [1]]} [& args] nil)",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    let spec = reg.get("defnested").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Other, Role::Other]);
+    assert!(spec.body);
+}
+
+#[test]
 fn harvest_clojure_style_indent_defn_keyword_is_body() {
     let mut reg = Registry::new();
     harvest_source_for(
@@ -402,6 +417,85 @@ fn harvest_scheme_picks_richest_rule() {
     let spec = reg.get("my-def").expect("harvested");
     assert_eq!(spec.leading, vec![Role::Name]);
     assert!(spec.body);
+}
+
+#[test]
+fn harvest_racket_define_syntax_rule() {
+    // `(define-syntax-rule (name pat…) template)` — the name is the head of the
+    // pattern; the rest are the args (ADR-0031).
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(define-syntax-rule (define-thing name body) (define name body))",
+        Dialect::Racket,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("define-thing").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_racket_syntax_parse_strips_syntax_class() {
+    // syntax-parse pattern with a `name:id` syntax class — stripped to `name`.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(define-syntax (define-check stx)\n\
+           (syntax-parse stx\n\
+             [(_ name:id body ...) #'(define (name) body ...)]))",
+        Dialect::Racket,
+        &mut reg,
+    );
+    let spec = reg.get("define-check").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_racket_syntax_case_in_lambda() {
+    // A `syntax-case` transformer wrapped in a `lambda` is reached by the
+    // recursive search.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(define-syntax define-thing\n\
+           (lambda (stx)\n\
+             (syntax-case stx ()\n\
+               ((_ name val) (syntax (define name val))))))",
+        Dialect::Racket,
+        &mut reg,
+    );
+    let spec = reg.get("define-thing").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name, Role::Other]);
+    assert!(!spec.body);
+}
+
+#[test]
+fn harvest_guile_define_macro_dotted_tail_is_body() {
+    // Guile/Gauche legacy `(define-macro (name arg . body) …)`: the signature is
+    // an arglist and the dotted tail is the body (ADR-0031).
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(define-macro (define-thing name . body) (cons name body))",
+        Dialect::Guile,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("define-thing").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_guile_define_macro_procedural_is_skipped() {
+    // `(define-macro name (lambda …))` has a symbol, not a signature list, so
+    // there is no arglist to harvest.
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(define-macro my-macro (lambda (form) form))",
+        Dialect::Guile,
+        &mut reg,
+    );
+    assert_eq!(added, 0);
 }
 
 #[test]

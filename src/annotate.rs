@@ -651,7 +651,7 @@ pub fn harvest_source_for(source: &str, dialect: Dialect, reg: &mut Registry) ->
     let mut added = 0;
     if is_syntax_rules_dialect(dialect) {
         for datum in &parsed.data {
-            if let Some(spec) = harvest_syntax_rules(datum) {
+            if let Some(spec) = harvest_scheme_macro(datum) {
                 reg.insert(spec);
                 added += 1;
             }
@@ -892,62 +892,77 @@ enum StyleIndent {
 }
 
 /// The [`StyleIndent`] from a Clojure metadata map's `:style/indent`, if present
-/// and in a form we interpret (an integer or the `:defn`/`:form` keywords). The
-/// nested `[n …]` list form names no roles and is ignored.
+/// and in a form we interpret. The value is an integer, the `:defn`/`:form`
+/// keywords, or a nested `[n …]` list/vector whose *first* element is the
+/// form-level spec (the rest describe nested args, which name no roles); the
+/// bare `[x]` is CIDER shorthand for `x`, so this reads the head recursively.
 fn clojure_style_indent(meta: &Datum<'_>) -> Option<StyleIndent> {
-    match &clojure_meta_value(meta, ":style/indent")?.kind {
+    interpret_style_indent(clojure_meta_value(meta, ":style/indent")?)
+}
+
+fn interpret_style_indent(spec: &Datum<'_>) -> Option<StyleIndent> {
+    match &spec.kind {
         DatumKind::Number(n) => n.parse::<usize>().ok().map(StyleIndent::Count),
         DatumKind::Keyword(":defn" | ":form") => Some(StyleIndent::Body),
+        // Nested `[n …]`: the head element is the form-level indentation.
+        DatumKind::List { .. } => interpret_style_indent(spec.items()?.first()?),
         _ => None,
     }
 }
 
-/// Harvest a [`FormSpec`] from a `(define-syntax NAME (syntax-rules …))` form
-/// by reading its rules' input patterns (ADR-0031).
+/// Harvest a [`FormSpec`] from a Scheme-family macro definition by reading its
+/// input pattern(s) (ADR-0031).
 ///
-/// Each rule is `(PATTERN TEMPLATE)`; the pattern `(_ name (arg …) body …)`
-/// names the argument roles and shows their nesting/repetition. Roles come from
-/// the pattern-variable names (via [`classify_param`]) — a nested list is an
-/// arglist-shaped sub-pattern (`Arglist`), and a trailing `X …` ellipsis marks
-/// the body. Procedural transformers (`er-macro-transformer`, a lambda, …)
-/// carry no pattern and are skipped. Scheme has no docstrings and the defined
-/// macro's category is unknown, so both are absent.
-fn harvest_syntax_rules(form: &Datum<'_>) -> Option<FormSpec> {
+/// Handles the pattern-carrying macro forms:
+/// - `(define-syntax NAME (syntax-rules … (PATTERN TEMPLATE) …))`, and the same
+///   with a `syntax-case` / `syntax-parse` transformer (Racket), found wherever
+///   it sits in the transformer expression (e.g. inside a `lambda`);
+/// - `(define-syntax-rule (NAME pat …) TEMPLATE)` (Racket/Guile);
+/// - `(define-macro (NAME arg … . body) …)` — Guile/Gauche/Gambit legacy
+///   non-hygienic macros, whose signature is an ordinary arglist (a dotted tail
+///   is the body); the `(define-macro NAME proc)` procedural form is skipped.
+///
+/// A pattern `(_ name (arg …) body …)` names the argument roles and shows their
+/// nesting/repetition: a nested list is an arglist-shaped sub-pattern
+/// (`Arglist`), a trailing `X …` ellipsis marks the body, and a `syntax-parse`
+/// syntax-class suffix (`name:id`) is stripped before classification. Procedural
+/// transformers with no pattern (`er-macro-transformer`, a plain template) are
+/// skipped. Scheme has no docstrings and the defined macro's category is
+/// unknown, so both are absent.
+fn harvest_scheme_macro(form: &Datum<'_>) -> Option<FormSpec> {
     let (head, items) = list_head(form)?;
-    if head != "define-syntax" {
-        return None;
+    if head == "define-macro" {
+        return harvest_define_macro(items);
     }
-    let name = match items.get(1)?.kind {
-        DatumKind::Symbol(s) => s,
+    // Collect the input pattern(s) and the defined name.
+    let (name, patterns): (&str, Vec<&Datum<'_>>) = match head {
+        // `(define-syntax-rule (name pat…) template)`: the pattern *is* the
+        // name-plus-args list (classify_pattern skips index 0 = the name).
+        "define-syntax-rule" => {
+            let pattern = items.get(1)?;
+            let name = pattern.items()?.first()?.as_symbol()?;
+            (name, vec![pattern])
+        }
+        "define-syntax" | "define-syntax-parameter" => {
+            let name = scheme_def_name(items.get(1)?)?;
+            // Find syntax-rules/-case/-parse clauses anywhere in the transformer
+            // expression, then take each clause's input pattern (its first item,
+            // itself a list).
+            let clauses = items.get(2..)?.iter().find_map(find_transformer_clauses)?;
+            let patterns = clauses
+                .iter()
+                .filter_map(|c| c.items().and_then(|x| x.first()))
+                .filter(|p| matches!(&p.kind, DatumKind::List { .. }))
+                .collect();
+            (name, patterns)
+        }
         _ => return None,
     };
-    // The transformer must be `(syntax-rules …)`.
-    let (thead, titems) = list_head(items.get(2)?)?;
-    if thead != "syntax-rules" {
-        return None;
-    }
-    // syntax-rules args: an optional custom-ellipsis identifier, then the
-    // literal list, then the rules.
-    let mut idx = 1;
-    if matches!(titems.get(idx).map(|d| &d.kind), Some(DatumKind::Symbol(_))) {
-        idx += 1; // custom ellipsis
-    }
-    // Skip the literal list.
-    if !matches!(
-        titems.get(idx).map(|d| &d.kind),
-        Some(DatumKind::List { .. })
-    ) {
-        return None;
-    }
-    idx += 1;
 
-    // Derive a spec from each rule's pattern; keep the richest (most classified
-    // roles, then longest).
+    // Derive a spec from each pattern; keep the richest (most classified roles,
+    // then longest).
     let mut best: Option<(Vec<Role>, bool, usize)> = None;
-    for rule in &titems[idx.min(titems.len())..] {
-        let Some(pattern) = rule.items().and_then(|r| r.first()) else {
-            continue;
-        };
+    for pattern in patterns {
         let Some((leading, body, matched)) = classify_pattern(pattern) else {
             continue;
         };
@@ -974,9 +989,68 @@ fn harvest_syntax_rules(form: &Datum<'_>) -> Option<FormSpec> {
     ))
 }
 
-/// Classify a `syntax-rules` input pattern `(_ p …)` into leading roles, a body
-/// flag, and the count of positions that classified to a known role. Returns
-/// `None` if the pattern is not a list.
+/// Harvest a Guile/Gauche `(define-macro (NAME arg … . body) …)`: the signature
+/// is an ordinary arglist, and a dotted tail (`. body`) is the body. The
+/// procedural `(define-macro NAME (lambda …))` form has a symbol, not a
+/// signature list, in the name position and is skipped.
+fn harvest_define_macro(items: &[Datum<'_>]) -> Option<FormSpec> {
+    let DatumKind::List {
+        items: sig, tail, ..
+    } = &items.get(1)?.kind
+    else {
+        return None;
+    };
+    let name = sig.first()?.as_symbol()?;
+    let (leading, _doc, mut body, matched) = classify_arglist_params(sig.get(1..)?);
+    if tail.is_some() {
+        body = true; // `. body` — the dotted tail is the remainder
+    }
+    let confidence = if matched {
+        Confidence::Inferred
+    } else {
+        Confidence::Weak
+    };
+    Some(FormSpec::new(
+        name,
+        leading,
+        Docstring::None,
+        body,
+        confidence,
+    ))
+}
+
+/// The defined name of a Scheme definition head argument: a bare symbol
+/// (`(define-syntax NAME …)`) or the head of a `(NAME …)` list (function-style
+/// `(define-syntax (NAME stx) …)`).
+fn scheme_def_name<'t>(datum: &Datum<'t>) -> Option<&'t str> {
+    match &datum.kind {
+        DatumKind::Symbol(s) => Some(s),
+        DatumKind::List { .. } => datum.items()?.first()?.as_symbol(),
+        _ => None,
+    }
+}
+
+/// The clause list of the first `syntax-rules` / `syntax-case` / `syntax-parse`
+/// form found in `d` (searched recursively, so a transformer wrapped in a
+/// `lambda` is reached). Returns that form's items; the caller isolates the real
+/// clauses as the items whose first element is itself a list (the pattern),
+/// which skips the header parts (the keyword, a custom ellipsis, the literal
+/// list, a `syntax-case`/`-parse` stx expression).
+fn find_transformer_clauses<'a, 't>(d: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
+    let DatumKind::List { items, .. } = &d.kind else {
+        return None;
+    };
+    if let Some(h) = items.first().and_then(Datum::as_symbol) {
+        if matches!(h, "syntax-rules" | "syntax-case" | "syntax-parse") {
+            return Some(items);
+        }
+    }
+    items.iter().find_map(find_transformer_clauses)
+}
+
+/// Classify a macro input pattern `(_ p …)` into leading roles, a body flag, and
+/// the count of positions that classified to a known role. Returns `None` if the
+/// pattern is not a list.
 fn classify_pattern(pattern: &Datum<'_>) -> Option<(Vec<Role>, bool, usize)> {
     let params = pattern.items()?;
     let mut leading = Vec::new();
@@ -992,18 +1066,22 @@ fn classify_pattern(pattern: &Datum<'_>) -> Option<(Vec<Role>, bool, usize)> {
                 matched += 1;
                 break;
             }
-            DatumKind::Symbol(s) => match classify_param(s) {
-                Some(Role::Body) => {
-                    body = true;
-                    matched += 1;
-                    break;
+            DatumKind::Symbol(s) => {
+                // Strip a `syntax-parse` syntax-class suffix (`name:id` → `name`).
+                let base = s.split(':').next().unwrap_or(s);
+                match classify_param(base) {
+                    Some(Role::Body) => {
+                        body = true;
+                        matched += 1;
+                        break;
+                    }
+                    Some(role) => {
+                        leading.push(role);
+                        matched += 1;
+                    }
+                    None => leading.push(Role::Other),
                 }
-                Some(role) => {
-                    leading.push(role);
-                    matched += 1;
-                }
-                None => leading.push(Role::Other),
-            },
+            }
             // A nested list in an argument position is an arglist-shaped
             // sub-pattern (`(arg …)`).
             DatumKind::List { .. } => {

@@ -89,7 +89,9 @@ mechanism (`annotate_form`) was already dialect-agnostic and is unchanged.
   also read, as a lower-priority fallback (the analog of elisp `(indent N)`): it
   names only the body boundary, so an integer `n` pads the leading roles to `n`
   `Other` slots and opens the body, and `:defn`/`:form` just open the body — but
-  only when `:arglists` did not already pin a richer, role-named shape.
+  only when `:arglists` did not already pin a richer, role-named shape. The
+  nested `[n …]` list/vector form is read by taking its head element as the
+  form-level indent (the rest describe nested args, which name no roles).
 - Only Emacs Lisp's builtins are bundled from harvesting; other families' bundled
   cores stay hand-authored (ADR-0020), with harvesting reserved for consumers'
   project-local macros.

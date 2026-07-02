@@ -80,11 +80,17 @@ conservative-core / consumer-extensible ownership model (ADR-0020):
    `Confidence::Inferred` specs. Procedural transformers yield no pattern and are
    left to weak signals only (naming conventions, template-expands-to-`define`).
 
-   **Implemented** in `harvest_syntax_rules`, wired into `harvest_source_for`
-   for the Scheme family (ADR-0032): it reads each rule's input pattern, treats a
+   **Implemented** in `harvest_scheme_macro`, wired into `harvest_source_for`
+   for the Scheme family (ADR-0032). It reads each rule's input pattern, treats a
    nested list as an `Arglist`-shaped sub-pattern and a trailing `X …` ellipsis
    as the body tail, keeps the richest rule of a multi-rule macro, and skips
-   procedural transformers (`er-macro-transformer`, a lambda, …).
+   procedural transformers (`er-macro-transformer`, a lambda with no pattern, …).
+   Coverage widened past bare `syntax-rules` to the other pattern-carrying forms:
+   `define-syntax-rule` (Racket/Guile), a `syntax-case` / `syntax-parse`
+   transformer found anywhere in the transformer expression (including inside a
+   `lambda`, with `name:id` syntax-class suffixes stripped), and the legacy
+   non-hygienic `define-macro` (Guile/Gauche/Gambit), whose signature is an
+   ordinary arglist with a dotted tail as the body.
 
 ## Consequences
 
