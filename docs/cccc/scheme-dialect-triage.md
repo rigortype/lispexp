@@ -240,3 +240,21 @@ the migration reproduces the exact same numbers as the pre-migration 0.2.0
 run — the double-unquote fix doesn't happen to be exercised by any of these
 real files, so this is a from-first-principles correctness fix confirmed by a
 targeted test, not something the audit corpora could have caught on their own.
+
+## Follow-up: `lispexp` 0.4.0's `walk_regions`/`Region` closes the loop
+
+`lispexp` 0.4.0 adds `walk_regions`/`Region { Code, SealedData, PorousData }`
+and `Region::is_prunable()` (true only for `SealedData`) specifically for the
+mistake described above: a plain binary `Class::Data` can't distinguish "safe
+to prune" from "data here, but a nested `unquote` can still reach code" — the
+exact ambiguity the first draft of the `cccc-scheme` migration got wrong.
+`cccc-scheme` now depends on `lispexp` 0.4 and `Builder::lower_datum` uses
+`walk_regions`/`Region` instead of `walk`/`Class`: it prunes only on
+`region.is_prunable()`, and everything else (`PorousData`, or a `Code`
+non-list) falls through to `Walk::Descend`, same as before but now expressed
+through a type that makes the distinction explicit rather than something a
+reader has to reconstruct from the doc comment. Re-running the same corpus
+audit reproduces the exact same numbers again (chibi-scheme 7,672; Gauche
+12,486 functions, 3 errors in 1 file) — a pure API-clarity refactor, no
+behavior change, since `Region::class()` was already defined to match the old
+`Class` semantics exactly.
