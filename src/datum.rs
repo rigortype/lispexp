@@ -73,7 +73,12 @@ pub enum DatumKind<'a> {
         arg: Option<Box<Datum<'a>>>,
     },
     /// Any `#tag`-shaped form; `tag` is captured verbatim and unvalidated
-    /// (ADR-0011). E.g. `""` for `#(...)`, `"u8"` for `#u8(...)`.
+    /// (ADR-0011). E.g. `""` for `#(...)`, `"u8"` for `#u8(...)`. The tag may
+    /// contain reader-macro glyphs — `` #`(…) `` (a Scheme `syntax-case`
+    /// template) reads as a `HashLiteral` with tag `` "`" ``, and `#,(…)` with
+    /// tag `","` — because a `#tag` immediately followed by an opening
+    /// delimiter is always this one form. A `#tag` *not* followed by a
+    /// delimiter (e.g. `` #`x ``) is instead a [`DatumKind::Symbol`].
     HashLiteral {
         /// The text between `#` and the following delimiter (may be empty).
         tag: &'a str,

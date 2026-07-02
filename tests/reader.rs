@@ -351,3 +351,36 @@ fn datum_text_sugar() {
     let items = data[0].items().unwrap();
     assert_eq!(items[0].text(source), "+");
 }
+
+#[test]
+fn hash_tag_with_reader_macro_glyph_is_one_hash_literal() {
+    // `#`(…)` — a chibi-scheme `syntax-case` template — reads as one
+    // HashLiteral whose tag is the backtick, not a quasiquote form (ADR-0011).
+    let data = scheme("#`(lambda (x) x)");
+    let DatumKind::HashLiteral { tag, inner } = &data[0].kind else {
+        panic!("expected HashLiteral, got {:?}", data[0].kind);
+    };
+    assert_eq!(*tag, "`");
+    assert!(matches!(
+        inner.as_deref().map(|d| &d.kind),
+        Some(DatumKind::List {
+            delim: Delim::Round,
+            ..
+        })
+    ));
+
+    // `#,(…)` likewise: tag is the comma.
+    let data = scheme("#,(x)");
+    assert!(matches!(
+        &data[0].kind,
+        DatumKind::HashLiteral { tag: ",", .. }
+    ));
+}
+
+#[test]
+fn hash_tag_without_a_delimiter_is_a_symbol() {
+    // A `#tag` NOT immediately followed by an opening delimiter is a symbol,
+    // not a HashLiteral — the `#tag(` form requires the delimiter.
+    let data = scheme("#`x");
+    assert_eq!(data[0].kind, DatumKind::Symbol("#`x"));
+}
