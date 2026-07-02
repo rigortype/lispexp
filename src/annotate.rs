@@ -724,12 +724,14 @@ impl Builtins {
 #[must_use]
 pub fn bundled_registry(dialect: Dialect) -> Registry {
     match dialect {
-        Dialect::Scheme
-        | Dialect::Guile
+        // Strict R7RS-small stays R7RS-faithful (ADR-0031).
+        Dialect::Scheme => scheme_builtins(),
+        // The extended family layers implementation-common forms on the core.
+        Dialect::Guile
         | Dialect::Gauche
         | Dialect::Mosh
         | Dialect::Gambit
-        | Dialect::SchemeSuperset => scheme_builtins(),
+        | Dialect::SchemeSuperset => scheme_extended_builtins(),
         Dialect::Racket => racket_builtins(),
         Dialect::CommonLisp => common_lisp_builtins(),
         Dialect::EmacsLisp => emacs_lisp_builtins(),
@@ -876,7 +878,10 @@ fn emacs_lisp_builtins() -> Registry {
     b.reg
 }
 
-/// Scheme's core definition forms (R7RS). Scheme has no docstrings.
+/// Scheme's core definition forms (strict R7RS-small). Scheme has no docstrings
+/// (ADR-0031). Implementation-specific forms (GOOPS/Gauche `define-class`, …)
+/// live in [`scheme_extended_builtins`], not here, to keep strict `Scheme`
+/// R7RS-faithful.
 fn scheme_builtins() -> Registry {
     use Category::{Macro, Type};
     use Docstring::None as NoDoc;
@@ -887,10 +892,48 @@ fn scheme_builtins() -> Registry {
     b.def("define-values", vec![Name], NoDoc, true, None);
     b.def("define-syntax", vec![Name], NoDoc, true, Some(Macro));
     b.def("define-record-type", vec![Name], NoDoc, true, Some(Type));
+    // R7RS library form; NAME may be a list `(foo bar)`, so no category.
+    b.def("define-library", vec![Name], NoDoc, true, None);
     b.reg
 }
 
-/// Racket's core: Scheme's plus `struct`.
+/// The extended Scheme family (Guile, Gauche, Mosh, Gambit, the `.scm`
+/// superset): the R7RS core plus the uncontested definition forms shared by
+/// Guile GOOPS and Gauche and common `.scm` code (ADR-0031). A spec fires only
+/// when its head appears, so forms absent from a given implementation never
+/// misfire (ADR-0030). `define-method` is deliberately omitted — its shape is
+/// not uniform (Gauche `(define-method name (args) …)` vs. Guile GOOPS
+/// `(define-method (name (a <c>) …) …)`) — and stays a consumer concern.
+fn scheme_extended_builtins() -> Registry {
+    use Category::{Class, Constant, Generic, Macro};
+    use Docstring::None as NoDoc;
+    use Role::{Name, Other};
+    let mut reg = scheme_builtins();
+    let mut b = Builtins::new();
+    // GOOPS/Gauche object system.
+    b.def("define-class", vec![Name], NoDoc, true, Some(Class));
+    b.def("define-generic", vec![Name], NoDoc, false, Some(Generic));
+    // Gauche `(define-constant name value)`.
+    b.def(
+        "define-constant",
+        vec![Name, Other],
+        NoDoc,
+        false,
+        Some(Constant),
+    );
+    // Gauche/Guile inlinable define — ambiguous like `define`, so no category.
+    b.def("define-inline", vec![Name], NoDoc, true, None);
+    // Guile/Racket shorthand macro; the first arg is the `(name pat…)` pattern.
+    b.def("define-syntax-rule", vec![Name], NoDoc, true, Some(Macro));
+    // Guile: optional/keyword-arg define and module-exporting define — both
+    // `define`-shaped and ambiguous, so no category.
+    b.def("define*", vec![Name], NoDoc, true, None);
+    b.def("define-public", vec![Name], NoDoc, true, None);
+    reg.merge(b.reg);
+    reg
+}
+
+/// Racket's core: Scheme's plus `struct` and `define-syntax-rule`.
 fn racket_builtins() -> Registry {
     let mut reg = scheme_builtins();
     reg.insert(
@@ -902,6 +945,16 @@ fn racket_builtins() -> Registry {
             Confidence::Builtin,
         )
         .with_category(Category::Struct),
+    );
+    reg.insert(
+        FormSpec::new(
+            "define-syntax-rule",
+            vec![Role::Name],
+            Docstring::None,
+            true,
+            Confidence::Builtin,
+        )
+        .with_category(Category::Macro),
     );
     reg
 }
