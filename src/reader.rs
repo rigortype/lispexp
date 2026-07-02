@@ -73,6 +73,22 @@ pub struct FormAt<'a> {
 ///
 /// A leading `#lang` line is skipped, not surfaced — use [`parse`] to capture
 /// it.
+///
+/// ```
+/// use lispexp::{parse_form_at, Options};
+///
+/// let src = "(first x) (second y)";
+/// let opts = Options::scheme();
+///
+/// let a = parse_form_at(src, 0, &opts).unwrap();
+/// assert_eq!(a.form.head_symbol(), Some("first"));
+///
+/// // Feed `end` back to read the following form.
+/// let b = parse_form_at(src, a.end, &opts).unwrap();
+/// assert_eq!(b.form.head_symbol(), Some("second"));
+///
+/// assert!(parse_form_at(src, b.end, &opts).is_none()); // no more forms
+/// ```
 #[must_use]
 pub fn parse_form_at<'a>(source: &'a str, start: u32, options: &Options) -> Option<FormAt<'a>> {
     let tokens = significant_tokens(source, options, None);

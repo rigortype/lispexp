@@ -12,6 +12,18 @@ use crate::token::{Token, TokenKind, UnterminatedKind};
 
 /// Lex `source` under `options`, yielding a token stream that tiles the input.
 /// `source` must be at most `u32::MAX` bytes ([`Span`] stores `u32` offsets).
+///
+/// Unlike the tree, the token stream keeps trivia (whitespace, comments) — the
+/// layer a formatter or parinfer backend wants:
+///
+/// ```
+/// use lispexp::{lex, Options, TokenKind};
+///
+/// let comments = lex("(a ; note\n b)", &Options::scheme())
+///     .filter(|t| matches!(t.kind, TokenKind::LineComment))
+///     .count();
+/// assert_eq!(comments, 1);
+/// ```
 #[must_use]
 pub fn lex<'a, 'o>(source: &'a str, options: &'o Options) -> Lexer<'a, 'o> {
     Lexer::new(source, options)

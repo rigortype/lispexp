@@ -134,6 +134,24 @@ fn node_class(datum: &Datum<'_>, ctx: Ctx) -> Class {
 /// pre-order. When the callback returns [`Walk::Skip`], that datum's children
 /// are pruned; [`Walk::Descend`] recurses; [`Walk::Stop`] aborts the whole
 /// walk. Top-level data start as [`Class::Code`].
+///
+/// ```
+/// use lispexp::{parse, walk, Class, Walk, DatumKind, Options};
+///
+/// // `'(a b)` is quoted data; a code-only pass prunes it.
+/// let parsed = parse("(when x '(a b) (f y))", &Options::scheme());
+/// let mut code_lists = 0;
+/// walk(&parsed.data, |datum, class| {
+///     if class == Class::Data {
+///         return Walk::Skip;
+///     }
+///     if matches!(datum.kind, DatumKind::List { .. }) {
+///         code_lists += 1;
+///     }
+///     Walk::Descend
+/// });
+/// assert_eq!(code_lists, 2); // the `(when …)` and `(f y)` lists, not `(a b)`
+/// ```
 pub fn walk<'a, 't, F>(data: &'a [Datum<'t>], mut visit: F)
 where
     F: FnMut(&'a Datum<'t>, Class) -> Walk,
