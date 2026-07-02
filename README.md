@@ -21,6 +21,10 @@ lispexp is a faithful **reader**, not a syntax checker, validator, linter, or co
 
 It does report the **structural** problems that fall out of parsing — unbalanced/mismatched/unexpected delimiters, dangling reader-macro prefixes, malformed tokens — through `Parsed::errors` (an `ErrorKind` per issue), always on; `parsed.errors.is_empty()` is a usable "structurally clean" check. Anything dialect-*semantic* (is this tag/number/keyword legal here?) is out of scope by design; a stricter or dialect-aware validator is a thin layer a consumer builds on `errors` and `parse_form_at`, not a mode of the reader.
 
+### A substrate for static analysis
+
+Stopping at the syntactic layer is what makes lispexp a good *foundation* for higher-level tools — linters, indexers, formatters, complexity analyzers. lispexp supplies the **syntactic substrate**: a faithful position-annotated tree, structural diagnostics, the [code-vs-data walker](docs/adr/0026-code-vs-data-walker.md) (so a tool never lints inside quoted data), the definition-form [`annotate`](https://docs.rs/lispexp/latest/lispexp/annotate/) module (name/arglist/docstring/body/method-dispatch structure), [`indent`](https://docs.rs/lispexp/latest/lispexp/indent/) specs, and positioned reparse for editor integration. A tool adds the **semantic layer** — name binding, scope, macro knowledge, dialect rules — on top; it completes lispexp rather than fighting it (the same mechanism-vs-policy split the reader uses for write-safety). One seam worth knowing: the Datum tree drops comments and whitespace, so a trivia-sensitive tool reads those from the independent [`lex`](https://docs.rs/lispexp/latest/lispexp/fn.lex.html) token stream and correlates the two by byte span.
+
 ## Install
 
 ```sh
