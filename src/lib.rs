@@ -68,8 +68,9 @@
 //! - [`walk`] — a pruning visitor that classifies each node as [`Class::Code`]
 //!   or [`Class::Data`], so a tool descends into code and skips quoted data;
 //!   [`walk_regions`] refines `Data` into prunable [`Region::SealedData`] vs.
-//!   porous [`Region::PorousData`] so a `Skip` never drops quasiquoted code
-//!   (ADR-0026).
+//!   porous [`Region::PorousData`] so a `Skip` never drops quasiquoted code,
+//!   and [`code_nodes`] is a fixed-policy pre-order iterator over just the code
+//!   nodes (ADR-0026).
 //! - [`annotate`] — tags definition forms (name, arglist, docstring, body,
 //!   method dispatch) across dialects, from a bundled per-dialect core plus a
 //!   spec harvester that learns a project's own def-macros (ADR-0019/0020,
@@ -105,4 +106,4 @@ pub use options::{
 pub use reader::{parse, parse_form_at, FormAt, Parsed};
 pub use span::Span;
 pub use token::{Token, TokenKind, UnterminatedKind};
-pub use walk::{walk, walk_regions, Class, Region, Walk};
+pub use walk::{code_nodes, walk, walk_regions, Class, CodeNodes, Region, Walk};

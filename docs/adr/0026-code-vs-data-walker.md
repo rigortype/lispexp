@@ -101,3 +101,23 @@ consumer breaks):
 This does not add a third *classification* — "can this be evaluated?" is still
 binary. It adds a third *prunability* answer, which is the distinct question a
 pruning visitor actually poses.
+
+## Addendum (0.4.0): `code_nodes`, the promised iterator adapter
+
+The original decision deferred "an ergonomic pre-order `Iterator` adapter … may
+be layered on later," keeping the visitor primary because *arbitrary* pruning
+can't be a bare iterator. That caveat only applies to *arbitrary* pruning — the
+single most common consumer ("walk every code node") has a *fixed* policy, and a
+fixed policy **is** expressible as an iterator. `code_nodes(data) -> CodeNodes`
+yields each `Class::Code` node in pre-order, internally pruning `SealedData` and
+descending `PorousData` (so nested unquoted code is still reached). It hands the
+caller `Iterator`'s combinators (`filter`/`find`/`take`) with short-circuiting,
+instead of a callback that threads state through a closure.
+
+The visitor stays primary for consumers that need per-node `Skip`/`Stop`
+decisions (e.g. `cccc-scheme`, which handles a code `List` itself and prunes its
+already-visited children). To keep the two from diverging, the datum→children
+descent (and each prefix's region shift) is extracted into one internal
+`children()` helper that both `walk_datum` and `CodeNodes::next` route through,
+and a test asserts `code_nodes` yields exactly the nodes `walk_regions` classes
+as `Code` when descending everything — same set, same order.
