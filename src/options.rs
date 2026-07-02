@@ -14,7 +14,7 @@ use crate::datum::Prefix;
 /// only the `Ordinary` distinction (is it a delimiter at all?) affects parsing;
 /// `List`/`Vector`/`Map` all mean "an active delimiter" and differ only in the
 /// meaning a consumer assigns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DelimRole {
     /// An alternate list delimiter (Scheme `[]`).
     List,
@@ -28,6 +28,7 @@ pub enum DelimRole {
 
 impl DelimRole {
     /// Whether this role makes the bracket an active delimiter (not `Ordinary`).
+    #[must_use]
     pub fn is_delimiter(self) -> bool {
         self != DelimRole::Ordinary
     }
@@ -45,7 +46,7 @@ pub struct BlockComment {
 }
 
 /// How character literals are introduced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CharSyntax {
     /// `#\a`, `#\space` (Scheme, Common Lisp).
     HashBackslash,
@@ -56,7 +57,7 @@ pub enum CharSyntax {
 }
 
 /// What `#(` means in a dialect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HashParen {
     /// `#(...)` is a vector literal (data) — Scheme.
     Vector,
@@ -72,7 +73,7 @@ pub enum HashParen {
 /// order of competing flags. Distinct from the bare-`[` delimiter role
 /// ([`Options::square`]), which still applies when this is [`HashBracket::None`]
 /// (e.g. Racket/Emacs `#[...]` hash-vectors).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HashBracket {
     /// `#[...]` is a Gauche character-set literal, consumed as an opaque leaf.
     CharSet,
@@ -150,7 +151,7 @@ impl CharRoles {
 ///
 /// `#[non_exhaustive]`: new dialects are added over time, so downstream `match`es
 /// must include a wildcard arm; adding a variant is not a breaking change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Dialect {
     /// R7RS-small Scheme.
@@ -187,13 +188,103 @@ pub enum Dialect {
     Edn,
 }
 
+impl Dialect {
+    /// Every currently-known dialect, in declaration order.
+    ///
+    /// `Dialect` is `#[non_exhaustive]`: new variants are added over time, so
+    /// `ALL` grows across versions. Do not assume today's `ALL` is complete —
+    /// match on `Dialect` with a wildcard arm, and treat this slice as "every
+    /// dialect this version of lispexp knows about," not a permanently fixed
+    /// set.
+    pub const ALL: &'static [Dialect] = &[
+        Dialect::Scheme,
+        Dialect::Clojure,
+        Dialect::CommonLisp,
+        Dialect::EmacsLisp,
+        Dialect::Racket,
+        Dialect::Janet,
+        Dialect::Hy,
+        Dialect::AutoLisp,
+        Dialect::Guile,
+        Dialect::Phel,
+        Dialect::Fennel,
+        Dialect::Lfe,
+        Dialect::Islisp,
+        Dialect::SchemeSuperset,
+        Dialect::Edn,
+    ];
+
+    /// The preset [`Options`] for this dialect — sugar for
+    /// [`Options::for_dialect`].
+    #[must_use]
+    pub fn options(&self) -> Options {
+        Options::for_dialect(*self)
+    }
+}
+
+impl std::fmt::Display for Dialect {
+    /// The dialect's kebab-case name (e.g. `"common-lisp"`), also accepted by
+    /// [`Dialect::from_str`](std::str::FromStr::from_str).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Dialect::Scheme => "scheme",
+            Dialect::Clojure => "clojure",
+            Dialect::CommonLisp => "common-lisp",
+            Dialect::EmacsLisp => "emacs-lisp",
+            Dialect::Racket => "racket",
+            Dialect::Janet => "janet",
+            Dialect::Hy => "hy",
+            Dialect::AutoLisp => "autolisp",
+            Dialect::Guile => "guile",
+            Dialect::Phel => "phel",
+            Dialect::Fennel => "fennel",
+            Dialect::Lfe => "lfe",
+            Dialect::Islisp => "islisp",
+            Dialect::SchemeSuperset => "scheme-superset",
+            Dialect::Edn => "edn",
+        };
+        f.write_str(name)
+    }
+}
+
+/// The error returned by [`Dialect`]'s [`FromStr`](std::str::FromStr) impl
+/// when the input names no known dialect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseDialectError {
+    input: String,
+}
+
+impl std::fmt::Display for ParseDialectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown dialect: `{}`", self.input)
+    }
+}
+
+impl std::error::Error for ParseDialectError {}
+
+impl std::str::FromStr for Dialect {
+    type Err = ParseDialectError;
+
+    /// Parse a dialect's kebab-case [`Display`](std::fmt::Display) form (e.g.
+    /// `"common-lisp"`).
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Dialect::ALL
+            .iter()
+            .copied()
+            .find(|d| d.to_string() == s)
+            .ok_or_else(|| ParseDialectError {
+                input: s.to_owned(),
+            })
+    }
+}
+
 /// Reader/lexer configuration. Construct via a preset such as
 /// [`Options::scheme`] or [`Options::clojure`], then adjust fields if needed.
 ///
 /// `#[non_exhaustive]`: build from a preset and tweak fields (`Options {
 /// square: DelimRole::List, ..Options::scheme() }`) rather than naming every
 /// field, so adding a syntax toggle is not a breaking change.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Options {
     /// Character that starts a line comment (`;` for most; `#` for Janet).
@@ -301,6 +392,7 @@ pub struct Options {
 
 impl Options {
     /// R7RS-small Scheme (the first implemented dialect).
+    #[must_use]
     pub fn scheme() -> Self {
         Options {
             line_comment: ';',
@@ -349,6 +441,7 @@ impl Options {
     }
 
     /// Clojure.
+    #[must_use]
     pub fn clojure() -> Self {
         Options {
             line_comment: ';',
@@ -393,6 +486,7 @@ impl Options {
     }
 
     /// Common Lisp (ANSI).
+    #[must_use]
     pub fn common_lisp() -> Self {
         Options {
             line_comment: ';',
@@ -441,6 +535,7 @@ impl Options {
     }
 
     /// Emacs Lisp.
+    #[must_use]
     pub fn emacs_lisp() -> Self {
         Options {
             line_comment: ';',
@@ -485,6 +580,7 @@ impl Options {
 
     /// Racket. Layers on the Scheme surface with `#lang`, `#:` keywords, `[]`/`{}`
     /// as code lists, `#'` syntax, and `#[`/`#{` vectors.
+    #[must_use]
     pub fn racket() -> Self {
         Options {
             square: DelimRole::List,
@@ -501,6 +597,7 @@ impl Options {
     }
 
     /// Janet. Note: `#` is the line comment, `;` is splice, `~` is quasiquote.
+    #[must_use]
     pub fn janet() -> Self {
         Options {
             line_comment: '#',
@@ -531,6 +628,7 @@ impl Options {
     }
 
     /// Hy (a Lisp that compiles to Python).
+    #[must_use]
     pub fn hy() -> Self {
         Options {
             block_comment: None,
@@ -559,6 +657,7 @@ impl Options {
 
     /// AutoLISP (AutoCAD). Minimal: `'` quote only, `;|...|;` block comments,
     /// no character literals, no reader syntax.
+    #[must_use]
     pub fn autolisp() -> Self {
         Options {
             block_comment: Some(BlockComment {
@@ -585,6 +684,7 @@ impl Options {
     }
 
     /// Guile (a Scheme implementation with extensions).
+    #[must_use]
     pub fn guile() -> Self {
         Options {
             hash_keyword: true,                      // #:kw keywords
@@ -595,6 +695,7 @@ impl Options {
     }
 
     /// Phel (a Clojure-like Lisp that compiles to PHP).
+    #[must_use]
     pub fn phel() -> Self {
         // Phel's reader is essentially Clojure's; #php tagged literals are
         // already covered by tagged_literals.
@@ -610,6 +711,7 @@ impl Options {
     /// Namespaced maps (`#:ns{…}`) also read (as a tagged-literal marker on the
     /// following map): they are accepted by `clojure.edn` although absent from
     /// the EDN spec text.
+    #[must_use]
     pub fn edn() -> Self {
         Options {
             hash_paren: HashParen::None, // no `#(` anonymous functions
@@ -629,6 +731,7 @@ impl Options {
     }
 
     /// Fennel (a Lisp that compiles to Lua).
+    #[must_use]
     pub fn fennel() -> Self {
         Options {
             block_comment: None,
@@ -648,6 +751,7 @@ impl Options {
     }
 
     /// LFE (Lisp Flavoured Erlang).
+    #[must_use]
     pub fn lfe() -> Self {
         Options {
             block_comment: Some(BlockComment {
@@ -664,6 +768,7 @@ impl Options {
     }
 
     /// ISLisp (ISO/IEC 13816).
+    #[must_use]
     pub fn islisp() -> Self {
         Options {
             square: DelimRole::Ordinary, // [] {} are ordinary symbol chars
@@ -697,6 +802,7 @@ impl Options {
     /// that changes tree shape (a mis-guessed keyword vs. symbol is still a
     /// leaf, never a sync loss). Gerbil's `.ss`-only `[]`→`(@list …)` /
     /// `{}`→`(@method …)` conventions are out of scope; `{` `}` stay ordinary.
+    #[must_use]
     pub fn scheme_superset() -> Self {
         Options {
             hash_bracket: HashBracket::CharSet, // Gauche  #[...]
@@ -711,6 +817,7 @@ impl Options {
     }
 
     /// Options for a named [`Dialect`].
+    #[must_use]
     pub fn for_dialect(dialect: Dialect) -> Self {
         match dialect {
             Dialect::Scheme => Options::scheme(),
@@ -733,6 +840,7 @@ impl Options {
 }
 
 impl Default for Options {
+    /// The default is [`Options::scheme`].
     fn default() -> Self {
         Options::scheme()
     }

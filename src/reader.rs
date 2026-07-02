@@ -11,7 +11,7 @@ use crate::span::Span;
 use crate::token::{Token, TokenKind};
 
 /// The result of reading a source string. Borrows the source (ADR-0008).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parsed<'a> {
     /// A leading dialect directive such as Racket's `#lang racket`, if any.
     /// Passive — captured, not acted on (ADR-0012). Always `None` for Scheme.
@@ -26,6 +26,8 @@ pub struct Parsed<'a> {
 /// on pathologically nested input: list/hash nesting deeper than
 /// [`MAX_DEPTH`] stops descending, reports [`ErrorKind::DepthLimitExceeded`]
 /// once, and skips the too-deep subtree (ADR-0004), keeping prior siblings.
+/// `source` must be at most `u32::MAX` bytes ([`Span`] stores `u32` offsets).
+#[must_use]
 pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
     let mut lang_line: Option<&'a str> = None;
     let tokens = significant_tokens(source, options, Some(&mut lang_line));
@@ -42,7 +44,7 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
 ///
 /// The result of [`parse_form_at`]. Spans are absolute into the original
 /// `source`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormAt<'a> {
     /// The form that was read.
     pub form: Datum<'a>,
@@ -70,6 +72,7 @@ pub struct FormAt<'a> {
 ///
 /// A leading `#lang` line is skipped, not surfaced — use [`parse`] to capture
 /// it.
+#[must_use]
 pub fn parse_form_at<'a>(source: &'a str, start: u32, options: &Options) -> Option<FormAt<'a>> {
     let tokens = significant_tokens(source, options, None);
     let mut parser = Parser::new(source, tokens, options);

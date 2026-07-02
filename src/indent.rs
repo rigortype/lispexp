@@ -101,6 +101,7 @@ impl Extend<(String, IndentSpec)> for IndentTable {
 
 /// Harvest indent specs from Emacs Lisp `source` into a fresh [`IndentTable`]
 /// (ADR-0022). For a many-file harvest, prefer [`harvest_indent_specs_into`].
+#[must_use]
 pub fn harvest_indent_specs(source: &str) -> IndentTable {
     let mut table = IndentTable::new();
     harvest_indent_specs_into(source, &mut table);

@@ -387,6 +387,7 @@ fn list_head<'a, 't>(datum: &'a Datum<'t>) -> Option<(&'t str, &'a [Datum<'t>])>
 }
 
 /// Annotate a single form if its head is a known definition form.
+#[must_use]
 pub fn annotate_form<'a, 't>(form: &'a Datum<'t>, reg: &Registry) -> Option<Annotated<'a, 't>> {
     let (head, items) = list_head(form)?;
     let spec = reg.get(head)?;
@@ -523,6 +524,7 @@ fn is_name_shaped(datum: &Datum<'_>) -> bool {
 
 /// Recursively annotate every definition form in `data`, in source order
 /// (outer forms before the inner forms they contain).
+#[must_use]
 pub fn annotate_tree<'a, 't>(data: &'a [Datum<'t>], reg: &Registry) -> Vec<Annotated<'a, 't>> {
     let mut out = Vec::new();
     for datum in data {
@@ -719,6 +721,7 @@ impl Builtins {
 /// long tail (project-local def-macros, contested classifications) stays with
 /// the consumer, composed on top of this core. EDN, a data-only dialect, has no
 /// definitions and returns an empty registry.
+#[must_use]
 pub fn bundled_registry(dialect: Dialect) -> Registry {
     match dialect {
         Dialect::Scheme => scheme_builtins(),

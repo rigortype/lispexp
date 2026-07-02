@@ -120,7 +120,7 @@ fn close_glyph(delim: Delim) -> &'static str {
 /// A non-fatal parse diagnostic. The reader is fault-tolerant (ADR-0004): it
 /// returns a partial tree plus a list of these, resynchronizing at the next
 /// top-level form.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseError {
     /// Byte range the diagnostic points at.
     pub span: Span,

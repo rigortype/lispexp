@@ -11,6 +11,11 @@
 //!   consumers like a parinfer backend that need lexical state, not a tree.
 //! - [`parse`] — builds the [`Parsed`] datum tree on top of the lexer.
 //!
+//! The lexer's EOF contract: tokens always tile the input, and an
+//! unterminated construct at end-of-input is reported as one
+//! [`TokenKind::Unterminated`] token carrying the lexical state it was in,
+//! rather than an error or a truncated token stream.
+//!
 //! # Example
 //!
 //! ```
@@ -42,6 +47,7 @@ pub use lexer::{lex, Lexer};
 pub use line_index::LineIndex;
 pub use options::{
     BlockComment, CharRoles, CharSyntax, DelimRole, Dialect, HashBracket, HashParen, Options,
+    ParseDialectError,
 };
 pub use reader::{parse, parse_form_at, FormAt, Parsed};
 pub use span::Span;

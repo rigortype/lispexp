@@ -6,7 +6,7 @@ use crate::span::Span;
 /// One lexeme. Tokens tile the input — every byte belongs to exactly one token,
 /// whitespace and comments included (ADR-0015). Carries only a span; text is
 /// recovered by slicing the source.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Token {
     /// The lexeme's classification.
     pub kind: TokenKind,
@@ -15,7 +15,7 @@ pub struct Token {
 }
 
 /// The classification of a [`Token`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     /// A run of whitespace (and commas, where they are whitespace).
     Whitespace,

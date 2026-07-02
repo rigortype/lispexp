@@ -52,3 +52,38 @@ fn edn_has_no_quote_family_glyphs() {
     assert_eq!(opts.roles.deref, None);
     assert_eq!(opts.roles.meta, None);
 }
+
+#[test]
+fn dialect_display_and_from_str_round_trip_over_all() {
+    use std::str::FromStr;
+    for &dialect in Dialect::ALL {
+        let name = dialect.to_string();
+        let parsed = Dialect::from_str(&name).unwrap_or_else(|e| {
+            panic!("failed to parse Dialect::{dialect:?}'s Display form {name:?}: {e}")
+        });
+        assert_eq!(parsed, dialect);
+    }
+}
+
+#[test]
+fn dialect_display_is_kebab_case() {
+    assert_eq!(Dialect::CommonLisp.to_string(), "common-lisp");
+    assert_eq!(Dialect::EmacsLisp.to_string(), "emacs-lisp");
+    assert_eq!(Dialect::SchemeSuperset.to_string(), "scheme-superset");
+    assert_eq!(Dialect::Scheme.to_string(), "scheme");
+}
+
+#[test]
+fn dialect_from_str_rejects_unknown() {
+    use std::str::FromStr;
+    let err = Dialect::from_str("not-a-real-dialect").unwrap_err();
+    assert!(err.to_string().contains("not-a-real-dialect"));
+}
+
+#[test]
+fn dialect_options_matches_for_dialect() {
+    assert_eq!(
+        Dialect::Janet.options(),
+        Options::for_dialect(Dialect::Janet)
+    );
+}

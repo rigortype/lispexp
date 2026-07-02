@@ -4,7 +4,7 @@ use crate::span::Span;
 
 /// A single parsed unit of S-expression syntax, annotated with its source span
 /// and 1-based start line. Borrows `&'a str` slices from the source (ADR-0008).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Datum<'a> {
     /// What this datum is.
     pub kind: DatumKind<'a>,
@@ -15,7 +15,7 @@ pub struct Datum<'a> {
 }
 
 /// The shape of a [`Datum`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DatumKind<'a> {
     /// A list. `tail: Some(_)` marks an improper/dotted list `(a b . c)`
     /// (ADR-0009). The delimiter is shape only; its *meaning* is the consumer's
@@ -29,10 +29,25 @@ pub enum DatumKind<'a> {
         tail: Option<Box<Datum<'a>>>,
     },
     /// A symbol; verbatim slice, including enclosing `|bars|` if piped.
+    ///
+    /// The `Symbol`/[`Number`](Self::Number) split is lexical-shape only,
+    /// following Scheme-ish rules; the classifier never interprets a value.
+    /// Anything ambiguous falls back to `Symbol` — e.g. Common Lisp's `1+` and
+    /// `1-` are conventionally functions, not numbers, so a leading digit
+    /// alone is not sufficient. Consumers that need a stricter or
+    /// dialect-specific numeric grammar reclassify `Symbol`/`Number` text
+    /// themselves; lispexp only records the token's shape.
     Symbol(&'a str),
     /// A keyword such as `:foo` or `#:foo`.
     Keyword(&'a str),
     /// A number; raw text, value never interpreted.
+    ///
+    /// Classification is lexical-shape only (see [`Symbol`](Self::Symbol)):
+    /// digits, sign, radix/exactness prefixes (`#x`, `#e`, `#36r...`), decimal
+    /// points, ratios, exponent markers, and a trailing complex `i` all
+    /// qualify. Clojure's symbolic values (`##Inf`, `##-Inf`, `##NaN`)
+    /// classify as `Number` in every dialect, since they are read as numeric
+    /// literals regardless of whether the dialect otherwise supports them.
     Number(&'a str),
     /// A string; raw slice including the surrounding quotes and escapes.
     Str(&'a str),

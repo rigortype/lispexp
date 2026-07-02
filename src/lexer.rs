@@ -11,6 +11,8 @@ use crate::span::Span;
 use crate::token::{Token, TokenKind, UnterminatedKind};
 
 /// Lex `source` under `options`, yielding a token stream that tiles the input.
+/// `source` must be at most `u32::MAX` bytes ([`Span`] stores `u32` offsets).
+#[must_use]
 pub fn lex<'a, 'o>(source: &'a str, options: &'o Options) -> Lexer<'a, 'o> {
     Lexer::new(source, options)
 }
