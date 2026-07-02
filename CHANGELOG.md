@@ -6,9 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-03
+
+A small, breaking release for text-based consumers. An improper/dotted list now records the byte span of its `.` separator, so a reindenter can align a tail continuation under the dot — the `'(eval . FORM)` font-lock idiom — without re-scanning the source.
+
 ### Changed
 
-- **Breaking:** `DatumKind::List` gains a fourth field, `dot: Option<Span>` — the byte span of the `.` separator of an improper/dotted list (`Some` iff `tail` is `Some`), also surfaced as the helper `Datum::dot_span()`. A text-based reindenter needs the dot's column to align a tail continuation under it (the `'(eval . FORM)` idiom), which `tail` alone can't give; recording the span the reader already consumes avoids a source re-scan (ADR-0009). This breaks exhaustive `List { delim, items, tail }` patterns and constructions — add the field or `..`. `DatumKind` remains exhaustive by design (walkers and formatters want a compiler-forced arm per kind), so the field is added outright rather than behind `#[non_exhaustive]`.
+- **Breaking:** `DatumKind::List` gains a fourth field `dot: Option<Span>` — the byte span of an improper list's `.` separator, `Some` exactly when `tail` is `Some` — also surfaced as the helper `Datum::dot_span()` (ADR-0009).
+  - A text-based reindenter needs the dot's column to align a tail continuation under it (the `'(eval . FORM)` idiom), which the `tail` datum alone can't give; the reader already consumes the `.` token, so it now keeps that span instead of leaving consumers to re-scan the source between the last item and the tail.
+  - This breaks exhaustive `List { delim, items, tail }` patterns and constructions — add the field or `..`. `DatumKind` stays exhaustive by design (code-vs-data walkers and formatters want a compiler-forced arm per kind), so the field is added outright rather than behind `#[non_exhaustive]`.
 
 ## [0.4.0] - 2026-07-02
 
@@ -119,7 +125,8 @@ Initial release: a pure-Rust, reader-only lexer and parser for S-expression synt
 - `lispexp::annotate`: a definition-form annotator that tags a form's parts (name, arglist, docstring, body) using declared metadata and a spec harvester that reads Emacs Lisp def-macros' own arglist parameter names.
 - Continuous parse-conformance corpus tests over real-world code (chibi-scheme, clojure/clojure, cl-ppcre, lem, magit, typed-racket).
 
-[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rigortype/lispexp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rigortype/lispexp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rigortype/lispexp/releases/tag/v0.3.0
 [0.2.1]: https://github.com/rigortype/lispexp/releases/tag/v0.2.1
