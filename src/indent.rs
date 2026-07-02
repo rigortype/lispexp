@@ -19,6 +19,15 @@
 //!
 //! Consistent with reader-only scope (ADR-0001): lispexp reads declared metadata
 //! and hands it over verbatim-typed — it never runs an indent function.
+//!
+//! # Example
+//!
+//! ```
+//! use lispexp::indent::{harvest_indent_specs, IndentSpec};
+//!
+//! let table = harvest_indent_specs("(defmacro with-x (x) (declare (indent 1)) x)");
+//! assert_eq!(table.get("with-x"), Some(&IndentSpec::Number(1)));
+//! ```
 
 use std::collections::HashMap;
 

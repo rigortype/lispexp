@@ -87,6 +87,14 @@ impl LineIndex {
     /// offsets from the line start. An offset past end-of-source clamps to the
     /// last position; an offset on a terminator byte maps past the line's
     /// content (on `\r` of a `\r\n`: content length + 1; on the `\n`: + 2).
+    ///
+    /// ```
+    /// use lispexp::LineIndex;
+    ///
+    /// let index = LineIndex::new("(a\n  b)");
+    /// assert_eq!(index.offset_to_line_col(0), (1, 1)); // '(' — line 1, col 1
+    /// assert_eq!(index.offset_to_line_col(5), (2, 3)); // 'b' — line 2, byte-col 3
+    /// ```
     pub fn offset_to_line_col(&self, offset: u32) -> (u32, u32) {
         let offset = offset.min(self.len);
         // Number of lines whose start is <= offset == the 1-based line.

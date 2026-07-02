@@ -19,6 +19,38 @@
 //!
 //! It never expands or evaluates macros; it only interprets declared/structural
 //! metadata.
+//!
+//! # Examples
+//!
+//! Locate a definition's parts using the bundled per-dialect core:
+//!
+//! ```
+//! use lispexp::annotate::{annotate_form, bundled_registry, Category, Role};
+//! use lispexp::{parse, Dialect, Options};
+//!
+//! let reg = bundled_registry(Dialect::EmacsLisp);
+//! let parsed = parse("(defun square (x) \"Square X.\" (* x x))", &Options::emacs_lisp());
+//! let def = annotate_form(&parsed.data[0], &reg).unwrap();
+//!
+//! assert_eq!(def.category, Some(Category::Function));
+//! assert_eq!(def.first(Role::Name).unwrap().as_symbol(), Some("square"));
+//! assert!(def.first(Role::Docstring).is_some());
+//! ```
+//!
+//! Teach the registry a project-local def-macro from its own arglist, then
+//! annotate a *use* of it:
+//!
+//! ```
+//! use lispexp::annotate::{annotate_form, bundled_registry, harvest_source_for, Role};
+//! use lispexp::{parse, Dialect, Options};
+//!
+//! let mut reg = bundled_registry(Dialect::EmacsLisp);
+//! harvest_source_for("(defmacro defthing (name &rest body) nil)", Dialect::EmacsLisp, &mut reg);
+//!
+//! let parsed = parse("(defthing widget (render))", &Options::emacs_lisp());
+//! let def = annotate_form(&parsed.data[0], &reg).unwrap();
+//! assert_eq!(def.first(Role::Name).unwrap().as_symbol(), Some("widget"));
+//! ```
 
 use std::collections::HashMap;
 
