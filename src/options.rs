@@ -214,7 +214,11 @@ pub enum Dialect {
     // --- Other Lisps ---
     /// ANSI Common Lisp.
     CommonLisp,
-    /// Emacs Lisp — the extension language of the GNU Emacs editor.
+    /// Emacs Lisp — the extension language of the GNU Emacs editor. The same
+    /// reader also covers the Emacs Lisp *Data* format (`lisp-data-mode`,
+    /// `.eld`): Emacs reads code and data with one `read`, so there is no
+    /// restricted data-only variant (unlike [`Edn`](Dialect::Edn) for Clojure)
+    /// — `'x`, `#'fn`, `#[…]`, and `#s(…)` are all valid readable data here.
     EmacsLisp,
     /// ISLisp — the ISO-standardized Lisp (ISO/IEC 13816).
     Islisp,
@@ -601,7 +605,10 @@ impl Options {
         }
     }
 
-    /// Emacs Lisp.
+    /// Emacs Lisp. Also the reader for the Emacs Lisp Data format
+    /// (`lisp-data-mode`, `.eld` files): Emacs uses one `read` for code and
+    /// data, so the data format needs no separate preset — "everything is
+    /// data" is a semantic stance, not a lexical restriction (ADR-0001).
     #[must_use]
     pub fn emacs_lisp() -> Self {
         Options {
