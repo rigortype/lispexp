@@ -19,7 +19,7 @@ lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or
 - **Fault-tolerant.** Malformed input never panics; the reader returns a partial tree plus structured diagnostics, resynchronizing at the next top-level form, with a bounded recursion depth.
 - **Zero-copy.** The parse tree borrows `&str` slices from the source; verbatim round-trip is lossless via source spans.
 - **Two layers.** A tree reader (`parse`) and an independent token stream (`lex`) that tiles the input — for consumers such as a parinfer backend that need lexical state rather than a tree.
-- **Definition-aware utilities.** An opt-in `annotate` module tags definition forms (name, arglist, docstring, body, method dispatch) across dialects, and an `indent` module harvests Emacs Lisp indent specs.
+- **Definition-aware utilities.** An opt-in `annotate` module tags definition forms (name, arglist, docstring, body, method dispatch) across dialects — from a bundled per-dialect core plus a **spec harvester** that learns a project's own def-macros from the structure each dialect already exposes (an elisp `declare`/arglist, a Clojure `:arglists`/`:style/indent`, a Scheme `syntax-rules` pattern). An `indent` module harvests Emacs Lisp indent specs.
 - **Pure Rust,** no `unsafe`, zero dependencies — cross-compiles cleanly. MSRV 1.70.
 
 ## Non-goals
@@ -62,6 +62,16 @@ Scheme is a family — R7RS-small plus implementations that extend its reader �
 - **`Options::scheme_superset()` (`Dialect::SchemeSuperset`) — the tolerant `.scm` reader.** The `.scm` extension is shared by [Gauche], Mosh (R6RS), and Gambit, whose reader extensions are *non-conflicting* widenings of R7RS. Because none of them reshapes valid R7RS, a single preset unions them all: `#[…]` char-sets and `#/…/` regexps (opaque `Str` leaves), `#"…"` interpolated strings, `#vu8(…)` bytevectors, and both leading-colon `:foo` and trailing-colon `foo:` keywords. This is why Gauche, unlike Guile and Racket, needs no bespoke preset — its surface already lives in the shared superset. `Dialect::Gauche`, `Dialect::Mosh`, and `Dialect::Gambit` are still selectable by name (including `"gauche"` etc. via `FromStr`) and all resolve to this one reader. On a full Gauche checkout the superset cuts parse errors from 288 (across 40 files) to 3 (one file, a `(exit 0)`-then-trailing-data idiom no full-file reader can model). See [ADR-0027](docs/adr/0027-scheme-superset-tolerant-reader.md).
 
 lispexp never infers a dialect across files or models the numeric tower: pick a preset per input (e.g. by file extension) and read.
+
+### Definition annotation
+
+The opt-in [`annotate`](https://docs.rs/lispexp/latest/lispexp/annotate/) module answers "is this form a definition, and where are its parts?" without evaluating or expanding anything ([ADR-0019](docs/adr/0019-definition-form-annotator.md), [ADR-0020](docs/adr/0020-per-dialect-definition-registries-hybrid-ownership.md)). It is three pieces:
+
+- a **registry** of form specs — which argument is the name, arglist, docstring, body, or method dispatch — seeded per dialect with a conservative core of the uncontested def-forms (`defun`, `defn`, `define`, `defmacro`, …);
+- a **spec harvester** (`harvest_source_for`) that extends the registry with a project's *own* def-macros, read from the structure each dialect already exposes rather than a hand-written table: an Emacs Lisp `declare` spec or a def-macro's arglist parameter names (also Common Lisp, Clojure, Fennel, Janet, Hy, LFE, ISLisp), a Clojure `:arglists`/`:style/indent` metadata map, or a Scheme-family `syntax-rules`/`syntax-case`/`syntax-parse` pattern ([ADR-0031](docs/adr/0031-scheme-family-annotator-and-syntax-rules-harvest.md), [ADR-0032](docs/adr/0032-cross-family-defmacro-harvester.md));
+- an **annotator** that walks the tree and tags each definition's parts, so a consumer reads `(cl-defun f (x) "doc" …)` as name/arglist/docstring/body without hard-coding `cl-defun`.
+
+Every spec carries a confidence/provenance, and the whole layer is best-effort and reader-only: it tags what it can confidently recognize — never expanding a macro or fabricating structure — and leaves the rest alone.
 
 ## Documentation
 
