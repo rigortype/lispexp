@@ -724,9 +724,12 @@ impl Builtins {
 #[must_use]
 pub fn bundled_registry(dialect: Dialect) -> Registry {
     match dialect {
-        Dialect::Scheme => scheme_builtins(),
-        Dialect::SchemeSuperset => scheme_builtins(),
-        Dialect::Guile => scheme_builtins(),
+        Dialect::Scheme
+        | Dialect::Guile
+        | Dialect::Gauche
+        | Dialect::Mosh
+        | Dialect::Gambit
+        | Dialect::SchemeSuperset => scheme_builtins(),
         Dialect::Racket => racket_builtins(),
         Dialect::CommonLisp => common_lisp_builtins(),
         Dialect::EmacsLisp => emacs_lisp_builtins(),

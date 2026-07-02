@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `Dialect::Gauche`, `Dialect::Mosh`, and `Dialect::Gambit`: named entry points for the `.scm`-using Scheme implementations, each resolving to the shared `Options::scheme_superset()` reader (ADR-0027) so `Dialect::from_str("gauche")` / `Dialect::ALL` cover them.
+
+### Changed
+
+- Every `Dialect` variant now carries an explanatory doc comment (what the dialect is, and its Scheme/Clojure lineage where relevant) and the variants are grouped by family; `Dialect::Guile` in particular is documented as GNU Guile, the official extension language of the GNU Project, rather than the terse "Guile Scheme".
+
 ## [0.2.0] - 2026-07-02
 
 The first breaking release since 0.1.0. It lands seven lisplens-driven capabilities — polyglot definition registries, method-dispatch annotation, an indent-spec table, structured errors with positioned reparse, a line index, an EDN preset, and a code-vs-data walker — plus a tolerant `.scm` "Scheme superset" preset, then folds in a reader-core refinement pass driven by a three-perspective audit (adversarial correctness, API design, and dialect fact-checking). The parse tree and token stream are reshaped for fidelity, fault-tolerant recovery is hardened (no lost input, a bounded recursion depth), and several per-dialect mis-parses are fixed. Many public enums and structs become `#[non_exhaustive]`, so this is the last release that permits exhaustive matching against them.
