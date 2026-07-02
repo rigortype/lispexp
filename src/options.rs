@@ -167,8 +167,13 @@ impl CharRoles {
 #[non_exhaustive]
 pub enum Dialect {
     // --- Scheme family: R7RS-small and the implementations that widen it ---
-    /// R7RS-small Scheme — the current minimal Scheme standard, and the base
-    /// the other Scheme variants below build on.
+    /// Scheme — lispexp's Scheme reader tracks the latest *small* Scheme
+    /// standard, currently **R7RS-small**, and is the base the other Scheme
+    /// variants below build on. There is deliberately no per-standard variant:
+    /// earlier RnRS code (R4RS/R5RS) is read as a subset, R6RS's distinct
+    /// `#vu8(…)` bytevectors are covered too, and version *conformance* is a
+    /// semantic concern beyond this reader (ADR-0001). A future R8RS-small
+    /// would update this baseline rather than add a variant.
     Scheme,
     /// GNU Guile — a Scheme implementation and the official extension language
     /// of the GNU Project (embedded in GNU Guix, GNU LilyPond, GDB, and more).
@@ -451,7 +456,9 @@ pub struct Options {
 }
 
 impl Options {
-    /// R7RS-small Scheme (the first implemented dialect).
+    /// Scheme, tracking the latest small Scheme standard — currently
+    /// **R7RS-small** (the first implemented dialect). Earlier RnRS code reads
+    /// as a subset; see [`Dialect::Scheme`] for the version-tracking policy.
     #[must_use]
     pub fn scheme() -> Self {
         Options {
