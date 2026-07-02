@@ -31,10 +31,11 @@ def-macro's argument structure:
   - **Arglist delimiter:** `()` list (elisp, Common Lisp, ISLisp, LFE) vs. `[]`
     vector (Clojure, Fennel, Janet, Hy). lispexp already reads both as
     `DatumKind::List` of a delimiter shape, so no special handling is needed.
-  - **Rest/optional markers:** all `&`-prefixed (`&rest`/`&body`/`&optional` in
-    CL/elisp, `&`/`&opt` in Clojure/Janet), with ISLisp's `:rest` the lone
-    outlier. A uniform rule — `&rest`/`&body`/`&` open the body, any other
-    `&…`/`:rest` is a non-role marker to skip — covers them all.
+  - **Rest/optional markers:** mostly `&`-prefixed (`&rest`/`&body`/`&optional`
+    in CL/elisp, `&`/`&opt` in Clojure/Janet), with ISLisp's `:rest` and Hy's
+    `#* args` / `#** kwargs` the outliers. A uniform rule — `&rest`/`&body`/`&`
+    open the body, any other `&…`/`:rest` is a non-role marker to skip, and a
+    Hy `#*`/`#**`-tagged parameter opens the body — covers them all.
   - **Macro-defining head:** `defmacro` for most, `cl-defmacro` (elisp),
     `defmacro-` (Janet), and `macro` (Fennel).
   - **Docstring:** elisp/Hy allow a lone trailing string; CL/Clojure/Janet/

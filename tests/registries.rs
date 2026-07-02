@@ -33,6 +33,13 @@ fn common_lisp_defclass_is_class() {
 }
 
 #[test]
+fn common_lisp_deftype_is_type() {
+    let (head, cat) = annotate_head("(deftype id () t)", Dialect::CommonLisp);
+    assert_eq!(head, "deftype");
+    assert_eq!(cat, Some(Category::Type));
+}
+
+#[test]
 fn scheme_define_syntax_is_macro() {
     let (_, cat) = annotate_head("(define-syntax swap! (syntax-rules () ))", Dialect::Scheme);
     assert_eq!(cat, Some(Category::Macro));
