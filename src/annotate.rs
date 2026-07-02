@@ -10,9 +10,10 @@
 //! Two pieces:
 //! - a [`Registry`] of [`FormSpec`]s keyed by head symbol: start from the
 //!   bundled per-dialect core ([`bundled_registry`], ADR-0020), extend with the
-//!   harvester ([`harvest_source`]) — which reads a macro's `declare` metadata
-//!   and, crucially for third-party macros, its own arglist parameter names —
-//!   and layer consumer-authored specs ([`FormSpec::define`]) on top;
+//!   harvester ([`harvest_source_for`], ADR-0032) — which reads a def-macro's
+//!   own arglist parameter names across every macro-defining Lisp, plus, for
+//!   Emacs Lisp, its `declare` metadata — and layer consumer-authored specs
+//!   ([`FormSpec::define`]) on top;
 //! - the annotator ([`annotate_form`] / [`annotate_tree`]), the dialect-agnostic
 //!   mechanism that applies a spec to a form.
 //!
@@ -564,16 +565,70 @@ fn classify_param(name: &str) -> Option<Role> {
     }
 }
 
+/// Per-dialect knobs for the def-macro harvester (ADR-0032). The core signal —
+/// a def-macro's own arglist parameter names — is shared across every
+/// macro-defining Lisp; only these differ.
+struct HarvestProfile {
+    /// The macro-defining heads to scan (`defmacro`, `cl-defmacro`, Fennel
+    /// `macro`, …).
+    macro_heads: &'static [&'static str],
+    /// Which [`Docstring`] variant a harvested spec gets *when* its arglist
+    /// names a docstring parameter — [`Docstring::None`] for dialects without
+    /// docstrings (ISLisp).
+    doc_policy: Docstring,
+    /// Whether to refine the spec with elisp `declare` metadata in the body
+    /// (`doc-string`, `debug (&define …)`) — Emacs Lisp only.
+    use_declare: bool,
+}
+
+/// The harvest profile for `dialect`, or `None` if its macros are not
+/// harvestable by the arglist-name heuristic. The Scheme family defines macros
+/// with `syntax-rules` patterns, not an arglist (a separate harvester, ADR-0031);
+/// EDN and AutoLISP have no user macros.
+fn harvest_profile(dialect: Dialect) -> Option<HarvestProfile> {
+    use Docstring::{Leading, LeadingOrLone, None as NoDoc};
+    let profile = |macro_heads, doc_policy, use_declare| HarvestProfile {
+        macro_heads,
+        doc_policy,
+        use_declare,
+    };
+    Some(match dialect {
+        Dialect::EmacsLisp => profile(&["defmacro", "cl-defmacro"], LeadingOrLone, true),
+        Dialect::CommonLisp => profile(&["defmacro"], Leading, false),
+        Dialect::Clojure | Dialect::Phel => profile(&["defmacro"], Leading, false),
+        Dialect::Fennel => profile(&["macro"], Leading, false),
+        Dialect::Janet => profile(&["defmacro", "defmacro-"], Leading, false),
+        Dialect::Hy => profile(&["defmacro"], LeadingOrLone, false),
+        Dialect::Lfe => profile(&["defmacro"], Leading, false),
+        Dialect::Islisp => profile(&["defmacro"], NoDoc, false),
+        _ => return None,
+    })
+}
+
 /// Harvest definition-form specs from Emacs Lisp `source` into `reg`.
 ///
-/// For each top-level `(defmacro NAME ARGLIST …)` / `(cl-defmacro …)`, derives a
-/// [`FormSpec`] from the arglist parameter names plus any `declare` metadata
-/// (`doc-string`, `debug (&define …)`). Returns the number of specs added.
+/// Shorthand for [`harvest_source_for`] with [`Dialect::EmacsLisp`].
 pub fn harvest_source(source: &str, reg: &mut Registry) -> usize {
-    let parsed = parse(source, &Options::emacs_lisp());
+    harvest_source_for(source, Dialect::EmacsLisp, reg)
+}
+
+/// Harvest definition-form specs from `dialect` `source` into `reg` (ADR-0032).
+///
+/// For each top-level def-macro (`(defmacro NAME ARGLIST …)`, Fennel
+/// `(macro …)`, …), derives a [`FormSpec`] from the arglist parameter names —
+/// the highest-yield, most portable signal across macro-defining Lisps — plus,
+/// for Emacs Lisp, any `declare` metadata (`doc-string`, `debug (&define …)`).
+/// Returns the number of specs added; `0` for dialects with no harvestable
+/// def-macro form (the Scheme family, whose `syntax-rules` macros need the
+/// pattern harvester of ADR-0031, and EDN/AutoLISP).
+pub fn harvest_source_for(source: &str, dialect: Dialect, reg: &mut Registry) -> usize {
+    let Some(profile) = harvest_profile(dialect) else {
+        return 0;
+    };
+    let parsed = parse(source, &Options::for_dialect(dialect));
     let mut added = 0;
     for datum in &parsed.data {
-        if let Some(spec) = harvest_defmacro(datum) {
+        if let Some(spec) = harvest_defmacro(datum, &profile) {
             reg.insert(spec);
             added += 1;
         }
@@ -581,12 +636,14 @@ pub fn harvest_source(source: &str, reg: &mut Registry) -> usize {
     added
 }
 
-fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
+fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSpec> {
     let (head, items) = list_head(form)?;
-    if head != "defmacro" && head != "cl-defmacro" {
+    if !profile.macro_heads.contains(&head) {
         return None;
     }
-    // items: [defmacro, NAME, ARGLIST, body...]
+    // items: [defmacro, NAME, ARGLIST, body...]. The arglist is a `()` list
+    // (CL/elisp/ISLisp/LFE) or a `[]` vector (Clojure/Fennel/Janet/Hy) — both
+    // are `DatumKind::List` of some delimiter shape.
     let name = match items.get(1)?.kind {
         DatumKind::Symbol(s) => s,
         _ => return None,
@@ -605,11 +662,15 @@ fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
         let DatumKind::Symbol(pname) = p.kind else {
             continue;
         };
-        if pname == "&optional" {
+        // Lambda-list markers are `&`-prefixed in every one of these dialects
+        // (elisp/CL `&rest`/`&body`/`&optional`, Clojure/Janet `&`/`&opt`, …):
+        // `&rest`/`&body`/`&` open the remainder, any other `&…` (or ISLisp's
+        // `:rest`) is a non-role marker to skip.
+        if matches!(pname, "&rest" | "&body" | "&") {
+            rest = true;
             continue;
         }
-        if pname == "&rest" || pname == "&body" {
-            rest = true;
+        if pname.starts_with('&') || pname == ":rest" {
             continue;
         }
         if rest {
@@ -639,19 +700,21 @@ fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
         }
     }
 
-    // Refine with `declare` metadata in the body.
+    // Refine with elisp `declare` metadata in the body (Emacs Lisp only).
     let mut declared = false;
-    for item in &items[3.min(items.len())..] {
-        if let Some(("declare", decl_items)) = list_head(item) {
-            for spec in &decl_items[1..] {
-                if let Some((key, _)) = list_head(spec) {
-                    match key {
-                        "doc-string" => {
-                            docstring = true;
-                            declared = true;
+    if profile.use_declare {
+        for item in &items[3.min(items.len())..] {
+            if let Some(("declare", decl_items)) = list_head(item) {
+                for spec in &decl_items[1..] {
+                    if let Some((key, _)) = list_head(spec) {
+                        match key {
+                            "doc-string" => {
+                                docstring = true;
+                                declared = true;
+                            }
+                            "debug" => declared = true, // often (&define …)
+                            _ => {}
                         }
-                        "debug" => declared = true, // often (&define …)
-                        _ => {}
                     }
                 }
             }
@@ -666,9 +729,9 @@ fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
         Confidence::Weak
     };
 
-    // Harvested macros are elisp, where a lone body string is a docstring.
+    // Apply the dialect's docstring policy only when a doc parameter was named.
     let docstring = if docstring {
-        Docstring::LeadingOrLone
+        profile.doc_policy
     } else {
         Docstring::None
     };

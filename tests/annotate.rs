@@ -1,8 +1,8 @@
 //! Tests for the definition-form annotator (ADR-0019).
 
 use lispexp::annotate::{
-    annotate_form, annotate_tree, bundled_registry, harvest_source, Confidence, Docstring,
-    Registry, Role,
+    annotate_form, annotate_tree, bundled_registry, harvest_source, harvest_source_for, Confidence,
+    Docstring, Registry, Role,
 };
 use lispexp::{parse, DatumKind, Dialect, Options};
 
@@ -211,6 +211,65 @@ fn harvest_ignores_non_defmacro() {
     let added = harvest_source("(defun foo () 1)\n(setq x 2)", &mut reg);
     assert_eq!(added, 0);
     assert!(reg.is_empty());
+}
+
+#[test]
+fn harvest_common_lisp_defmacro_body_marker() {
+    // CL `defmacro` with a `&body` lambda-list marker (ADR-0032): the arglist
+    // names `name`/`args`, `&body forms` opens the body.
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(defmacro define-widget (name args &body forms) `(progn ,@forms))",
+        Dialect::CommonLisp,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("define-widget").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name, Role::Arglist]);
+    assert!(spec.body);
+    assert_eq!(spec.confidence, Confidence::Inferred);
+}
+
+#[test]
+fn harvest_clojure_defmacro_vector_arglist() {
+    // Clojure def-macro: a `[name & body]` *vector* arglist with the `&` rest
+    // marker (ADR-0032).
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(defmacro defwidget [name & body] `(def ~name ~@body))",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("defwidget").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_fennel_macro_head() {
+    // Fennel defines macros with `macro`, not `defmacro` (ADR-0032).
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(macro defthing [name body] `(local ,name ,body))",
+        Dialect::Fennel,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    assert!(reg.get("defthing").is_some());
+}
+
+#[test]
+fn harvest_scheme_family_has_no_defmacro_harvester() {
+    // Scheme macros use syntax-rules patterns, not an arglist — harvested by a
+    // separate mechanism (ADR-0031), so this harvester yields nothing.
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(define-syntax swap! (syntax-rules () ((_ a b) (let ((t a)) (set! a b) (set! b t)))))",
+        Dialect::Scheme,
+        &mut reg,
+    );
+    assert_eq!(added, 0);
 }
 
 #[test]
