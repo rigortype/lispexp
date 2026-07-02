@@ -10,9 +10,10 @@
 //! Two pieces:
 //! - a [`Registry`] of [`FormSpec`]s keyed by head symbol: start from the
 //!   bundled per-dialect core ([`bundled_registry`], ADR-0020), extend with the
-//!   harvester ([`harvest_source`]) — which reads a macro's `declare` metadata
-//!   and, crucially for third-party macros, its own arglist parameter names —
-//!   and layer consumer-authored specs ([`FormSpec::define`]) on top;
+//!   harvester ([`harvest_source_for`], ADR-0032) — which reads a def-macro's
+//!   own arglist parameter names across every macro-defining Lisp, plus, for
+//!   Emacs Lisp, its `declare` metadata — and layer consumer-authored specs
+//!   ([`FormSpec::define`]) on top;
 //! - the annotator ([`annotate_form`] / [`annotate_tree`]), the dialect-agnostic
 //!   mechanism that applies a spec to a form.
 //!
@@ -21,7 +22,7 @@
 
 use std::collections::HashMap;
 
-use crate::datum::{Datum, DatumKind, Delim};
+use crate::datum::{Datum, DatumKind, Delim, Prefix};
 use crate::options::{Dialect, Options};
 use crate::reader::parse;
 
@@ -564,37 +565,239 @@ fn classify_param(name: &str) -> Option<Role> {
     }
 }
 
+/// Per-dialect knobs for the def-macro harvester (ADR-0032). The core signal —
+/// a def-macro's own arglist parameter names — is shared across every
+/// macro-defining Lisp; only these differ.
+struct HarvestProfile {
+    /// The macro-defining heads to scan (`defmacro`, `cl-defmacro`, Fennel
+    /// `macro`, …).
+    macro_heads: &'static [&'static str],
+    /// Which [`Docstring`] variant a harvested spec gets *when* its arglist
+    /// names a docstring parameter — [`Docstring::None`] for dialects without
+    /// docstrings (ISLisp).
+    doc_policy: Docstring,
+    /// Whether to refine the spec with elisp `declare` metadata in the body
+    /// (`doc-string`, `debug (&define …)`) — Emacs Lisp only.
+    use_declare: bool,
+    /// Whether to refine the spec with Clojure `:arglists` metadata (a `^{…}`
+    /// map on the name or an attr-map before the arglist) — Clojure/Phel only.
+    clojure_meta: bool,
+}
+
+/// The harvest profile for `dialect`, or `None` if its macros are not
+/// harvestable by the arglist-name heuristic. The Scheme family defines macros
+/// with `syntax-rules` patterns, not an arglist (a separate harvester, ADR-0031);
+/// EDN and AutoLISP have no user macros.
+fn harvest_profile(dialect: Dialect) -> Option<HarvestProfile> {
+    use Docstring::{Leading, LeadingOrLone, None as NoDoc};
+    let profile = |macro_heads, doc_policy, use_declare, clojure_meta| HarvestProfile {
+        macro_heads,
+        doc_policy,
+        use_declare,
+        clojure_meta,
+    };
+    Some(match dialect {
+        Dialect::EmacsLisp => profile(&["defmacro", "cl-defmacro"], LeadingOrLone, true, false),
+        Dialect::CommonLisp => profile(&["defmacro"], Leading, false, false),
+        Dialect::Clojure | Dialect::Phel => profile(&["defmacro"], Leading, false, true),
+        Dialect::Fennel => profile(&["macro"], Leading, false, false),
+        Dialect::Janet => profile(&["defmacro", "defmacro-"], Leading, false, false),
+        Dialect::Hy => profile(&["defmacro"], LeadingOrLone, false, false),
+        Dialect::Lfe => profile(&["defmacro"], Leading, false, false),
+        Dialect::Islisp => profile(&["defmacro"], NoDoc, false, false),
+        _ => return None,
+    })
+}
+
 /// Harvest definition-form specs from Emacs Lisp `source` into `reg`.
 ///
-/// For each top-level `(defmacro NAME ARGLIST …)` / `(cl-defmacro …)`, derives a
-/// [`FormSpec`] from the arglist parameter names plus any `declare` metadata
-/// (`doc-string`, `debug (&define …)`). Returns the number of specs added.
+/// Shorthand for [`harvest_source_for`] with [`Dialect::EmacsLisp`].
 pub fn harvest_source(source: &str, reg: &mut Registry) -> usize {
-    let parsed = parse(source, &Options::emacs_lisp());
+    harvest_source_for(source, Dialect::EmacsLisp, reg)
+}
+
+/// Whether `dialect` defines macros with `syntax-rules` patterns rather than an
+/// arglist — the Scheme family, harvested by [`harvest_syntax_rules`] (ADR-0031)
+/// rather than the arglist heuristic (ADR-0032).
+fn is_syntax_rules_dialect(dialect: Dialect) -> bool {
+    matches!(
+        dialect,
+        Dialect::Scheme
+            | Dialect::Guile
+            | Dialect::Gauche
+            | Dialect::Mosh
+            | Dialect::Gambit
+            | Dialect::SchemeSuperset
+            | Dialect::Racket
+    )
+}
+
+/// Harvest definition-form specs from `dialect` `source` into `reg`.
+///
+/// Two derivations, by dialect:
+/// - **Arglist heuristic (ADR-0032)** for the macro-defining Lisps whose
+///   def-macros carry an arglist (`(defmacro NAME ARGLIST …)`, Fennel
+///   `(macro …)`, …): roles come from the arglist parameter names — the
+///   highest-yield, most portable signal — plus, for Emacs Lisp, any `declare`
+///   metadata.
+/// - **`syntax-rules` pattern harvester (ADR-0031)** for the Scheme family:
+///   roles come from each rule's input pattern (`(_ name (arg …) body …)`),
+///   which names *and* nests the argument structure.
+///
+/// Returns the number of specs added; `0` for dialects with no harvestable
+/// def-macro form (EDN and AutoLISP).
+pub fn harvest_source_for(source: &str, dialect: Dialect, reg: &mut Registry) -> usize {
+    let parsed = parse(source, &Options::for_dialect(dialect));
     let mut added = 0;
-    for datum in &parsed.data {
-        if let Some(spec) = harvest_defmacro(datum) {
-            reg.insert(spec);
-            added += 1;
+    if is_syntax_rules_dialect(dialect) {
+        for datum in &parsed.data {
+            if let Some(spec) = harvest_scheme_macro(datum) {
+                reg.insert(spec);
+                added += 1;
+            }
+        }
+    } else if let Some(profile) = harvest_profile(dialect) {
+        for datum in &parsed.data {
+            if let Some(spec) = harvest_defmacro(datum, &profile) {
+                reg.insert(spec);
+                added += 1;
+            }
         }
     }
     added
 }
 
-fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
+fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSpec> {
     let (head, items) = list_head(form)?;
-    if head != "defmacro" && head != "cl-defmacro" {
+    if !profile.macro_heads.contains(&head) {
         return None;
     }
-    // items: [defmacro, NAME, ARGLIST, body...]
-    let name = match items.get(1)?.kind {
-        DatumKind::Symbol(s) => s,
+    // The name is a symbol, possibly wrapped in Clojure `^{…}` reader metadata
+    // (`(defmacro ^{:style/indent 1} name …)`), in which case the metadata map
+    // rides along as `arg`.
+    let name_datum = items.get(1)?;
+    let (name, name_meta) = match &name_datum.kind {
+        DatumKind::Symbol(s) => (*s, None),
+        DatumKind::Prefixed {
+            prefix: Prefix::Meta,
+            inner,
+            arg,
+            ..
+        } => match inner.kind {
+            DatumKind::Symbol(s) => (s, arg.as_deref()),
+            _ => return None,
+        },
         _ => return None,
     };
-    let DatumKind::List { items: params, .. } = &items.get(2)?.kind else {
+
+    // Find the arglist: the first list-shaped item after the name, skipping a
+    // leading docstring string and/or Clojure attr-map — CL/elisp/ISLisp/LFE
+    // put neither before the arglist, but Clojure/Janet put the docstring (and
+    // Clojure an attr-map) first. The arglist is a `()` list or a `[]` vector,
+    // both `DatumKind::List`.
+    let mut idx = 2;
+    let mut attr_map = None;
+    while let Some(item) = items.get(idx) {
+        match &item.kind {
+            DatumKind::Str(_) => idx += 1, // docstring-before-arglist
+            DatumKind::List {
+                delim: Delim::Curly,
+                ..
+            } => {
+                attr_map = Some(item);
+                idx += 1; // Clojure attr-map
+            }
+            _ => break,
+        }
+    }
+    let DatumKind::List { items: params, .. } = &items.get(idx)?.kind else {
         return None;
     };
 
+    let (mut leading, mut docstring, mut body, mut matched_any) = classify_arglist_params(params);
+
+    // Refine with elisp `declare` metadata in the body (Emacs Lisp only).
+    let mut declared = false;
+    if profile.use_declare {
+        for item in &items[(idx + 1).min(items.len())..] {
+            if let Some(("declare", decl_items)) = list_head(item) {
+                for spec in &decl_items[1..] {
+                    if let Some((key, _)) = list_head(spec) {
+                        match key {
+                            "doc-string" => {
+                                docstring = true;
+                                declared = true;
+                            }
+                            "debug" => declared = true, // often (&define …)
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Refine with Clojure metadata (ADR-0032) from the `^{…}` name metadata or
+    // the attr-map — the analog of elisp `declare`.
+    if profile.clojure_meta {
+        // `:arglists` names the authoritative call shape when an author
+        // overrides it — the richest signal.
+        let arglist = name_meta
+            .and_then(clojure_arglists)
+            .or_else(|| attr_map.and_then(clojure_arglists));
+        let mut arglists_applied = false;
+        if let Some(arglist) = arglist {
+            let (l, doc, b, matched) = classify_arglist_params(arglist);
+            if matched {
+                leading = l;
+                docstring = doc;
+                body = b;
+                matched_any = true;
+                declared = true;
+                arglists_applied = true;
+            }
+        }
+        // `:style/indent` names only the body boundary (no roles), so it is a
+        // fallback used when `:arglists` did not already pin the shape.
+        if !arglists_applied {
+            if let Some(indent) = name_meta
+                .and_then(clojure_style_indent)
+                .or_else(|| attr_map.and_then(clojure_style_indent))
+            {
+                if let StyleIndent::Count(n) = indent {
+                    if leading.len() < n {
+                        leading.resize(n, Role::Other);
+                    }
+                }
+                body = true;
+                declared = true;
+                matched_any = true;
+            }
+        }
+    }
+
+    let confidence = if declared {
+        Confidence::Declared
+    } else if matched_any {
+        Confidence::Inferred
+    } else {
+        Confidence::Weak
+    };
+
+    // Apply the dialect's docstring policy only when a doc parameter was named.
+    let docstring = if docstring {
+        profile.doc_policy
+    } else {
+        Docstring::None
+    };
+    Some(FormSpec::new(name, leading, docstring, body, confidence))
+}
+
+/// Classify a def-macro arglist's parameter names into `(leading roles,
+/// docstring-named, body, matched-any-known-role)`. Lambda-list markers are
+/// `&`-prefixed in every arglist-style dialect (`&rest`/`&body`/`&` open the
+/// body; any other `&…` or ISLisp `:rest` is a non-role marker to skip).
+fn classify_arglist_params(params: &[Datum<'_>]) -> (Vec<Role>, bool, bool, bool) {
     let mut leading = Vec::new();
     let mut docstring = false;
     let mut body = false;
@@ -605,15 +808,15 @@ fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
         let DatumKind::Symbol(pname) = p.kind else {
             continue;
         };
-        if pname == "&optional" {
-            continue;
-        }
-        if pname == "&rest" || pname == "&body" {
+        if matches!(pname, "&rest" | "&body" | "&") {
             rest = true;
             continue;
         }
+        if pname.starts_with('&') || pname == ":rest" {
+            continue;
+        }
         if rest {
-            // The &rest param stands for the remainder, never one fixed slot —
+            // The rest param stands for the remainder, never one fixed slot —
             // whatever its name classifies as, the remainder is the body.
             if classify_param(pname).is_some() {
                 matched_any = true;
@@ -638,41 +841,257 @@ fn harvest_defmacro(form: &Datum<'_>) -> Option<FormSpec> {
             None => leading.push(Role::Other),
         }
     }
+    (leading, docstring, body, matched_any)
+}
 
-    // Refine with `declare` metadata in the body.
-    let mut declared = false;
-    for item in &items[3.min(items.len())..] {
-        if let Some(("declare", decl_items)) = list_head(item) {
-            for spec in &decl_items[1..] {
-                if let Some((key, _)) = list_head(spec) {
-                    match key {
-                        "doc-string" => {
-                            docstring = true;
-                            declared = true;
-                        }
-                        "debug" => declared = true, // often (&define …)
-                        _ => {}
-                    }
-                }
+/// The value for `key` in a Clojure metadata map `{…}` (a flat key/value
+/// sequence), if `meta` is such a map and carries the key.
+fn clojure_meta_value<'a, 't>(meta: &'a Datum<'t>, key: &str) -> Option<&'a Datum<'t>> {
+    let DatumKind::List {
+        delim: Delim::Curly,
+        items,
+        ..
+    } = &meta.kind
+    else {
+        return None;
+    };
+    for pair in items.chunks(2) {
+        if let [k, v] = pair {
+            if matches!(k.kind, DatumKind::Keyword(kw) if kw == key) {
+                return Some(v);
             }
         }
     }
+    None
+}
 
-    let confidence = if declared {
-        Confidence::Declared
-    } else if matched_any {
+/// The first arglist vector of a Clojure `:arglists` metadata value, if `meta`
+/// is a `{…}` map carrying one. The value is `'([params…] …)` (a quoted list of
+/// vectors) or a bare list; this returns the params of its first vector.
+fn clojure_arglists<'a, 't>(meta: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
+    let value = clojure_meta_value(meta, ":arglists")?;
+    // Unwrap a leading quote (`'(…)`), then take the first arglist vector.
+    let list = match &value.kind {
+        DatumKind::Prefixed {
+            prefix: Prefix::Quote,
+            inner,
+            ..
+        } => inner.as_ref(),
+        _ => value,
+    };
+    list.items()?.first()?.items()
+}
+
+/// A Clojure `:style/indent` metadata value's body-boundary meaning (ADR-0032),
+/// the analog of elisp `(indent N)`.
+enum StyleIndent {
+    /// `n` leading distinguished arguments, then a body (integer form).
+    Count(usize),
+    /// Every argument indents as a body (`:defn` / `:form`).
+    Body,
+}
+
+/// The [`StyleIndent`] from a Clojure metadata map's `:style/indent`, if present
+/// and in a form we interpret. The value is an integer, the `:defn`/`:form`
+/// keywords, or a nested `[n …]` list/vector whose *first* element is the
+/// form-level spec (the rest describe nested args, which name no roles); the
+/// bare `[x]` is CIDER shorthand for `x`, so this reads the head recursively.
+fn clojure_style_indent(meta: &Datum<'_>) -> Option<StyleIndent> {
+    interpret_style_indent(clojure_meta_value(meta, ":style/indent")?)
+}
+
+fn interpret_style_indent(spec: &Datum<'_>) -> Option<StyleIndent> {
+    match &spec.kind {
+        DatumKind::Number(n) => n.parse::<usize>().ok().map(StyleIndent::Count),
+        DatumKind::Keyword(":defn" | ":form") => Some(StyleIndent::Body),
+        // Nested `[n …]`: the head element is the form-level indentation.
+        DatumKind::List { .. } => interpret_style_indent(spec.items()?.first()?),
+        _ => None,
+    }
+}
+
+/// Harvest a [`FormSpec`] from a Scheme-family macro definition by reading its
+/// input pattern(s) (ADR-0031).
+///
+/// Handles the pattern-carrying macro forms:
+/// - `(define-syntax NAME (syntax-rules … (PATTERN TEMPLATE) …))`, and the same
+///   with a `syntax-case` / `syntax-parse` transformer (Racket), found wherever
+///   it sits in the transformer expression (e.g. inside a `lambda`);
+/// - `(define-syntax-rule (NAME pat …) TEMPLATE)` (Racket/Guile);
+/// - `(define-macro (NAME arg … . body) …)` — Guile/Gauche/Gambit legacy
+///   non-hygienic macros, whose signature is an ordinary arglist (a dotted tail
+///   is the body); the `(define-macro NAME proc)` procedural form is skipped.
+///
+/// A pattern `(_ name (arg …) body …)` names the argument roles and shows their
+/// nesting/repetition: a nested list is an arglist-shaped sub-pattern
+/// (`Arglist`), a trailing `X …` ellipsis marks the body, and a `syntax-parse`
+/// syntax-class suffix (`name:id`) is stripped before classification. Procedural
+/// transformers with no pattern (`er-macro-transformer`, a plain template) are
+/// skipped. Scheme has no docstrings and the defined macro's category is
+/// unknown, so both are absent.
+fn harvest_scheme_macro(form: &Datum<'_>) -> Option<FormSpec> {
+    let (head, items) = list_head(form)?;
+    if head == "define-macro" {
+        return harvest_define_macro(items);
+    }
+    // Collect the input pattern(s) and the defined name.
+    let (name, patterns): (&str, Vec<&Datum<'_>>) = match head {
+        // `(define-syntax-rule (name pat…) template)`: the pattern *is* the
+        // name-plus-args list (classify_pattern skips index 0 = the name).
+        "define-syntax-rule" => {
+            let pattern = items.get(1)?;
+            let name = pattern.items()?.first()?.as_symbol()?;
+            (name, vec![pattern])
+        }
+        "define-syntax" | "define-syntax-parameter" => {
+            let name = scheme_def_name(items.get(1)?)?;
+            // Find syntax-rules/-case/-parse clauses anywhere in the transformer
+            // expression, then take each clause's input pattern (its first item,
+            // itself a list).
+            let clauses = items.get(2..)?.iter().find_map(find_transformer_clauses)?;
+            let patterns = clauses
+                .iter()
+                .filter_map(|c| c.items().and_then(|x| x.first()))
+                .filter(|p| matches!(&p.kind, DatumKind::List { .. }))
+                .collect();
+            (name, patterns)
+        }
+        _ => return None,
+    };
+
+    // Derive a spec from each pattern; keep the richest (most classified roles,
+    // then longest).
+    let mut best: Option<(Vec<Role>, bool, usize)> = None;
+    for pattern in patterns {
+        let Some((leading, body, matched)) = classify_pattern(pattern) else {
+            continue;
+        };
+        let better = best.as_ref().map_or(true, |(bl, _, bm)| {
+            (matched, leading.len()) > (*bm, bl.len())
+        });
+        if better {
+            best = Some((leading, body, matched));
+        }
+    }
+
+    let (leading, body, matched) = best?;
+    let confidence = if matched > 0 {
         Confidence::Inferred
     } else {
         Confidence::Weak
     };
+    Some(FormSpec::new(
+        name,
+        leading,
+        Docstring::None,
+        body,
+        confidence,
+    ))
+}
 
-    // Harvested macros are elisp, where a lone body string is a docstring.
-    let docstring = if docstring {
-        Docstring::LeadingOrLone
-    } else {
-        Docstring::None
+/// Harvest a Guile/Gauche `(define-macro (NAME arg … . body) …)`: the signature
+/// is an ordinary arglist, and a dotted tail (`. body`) is the body. The
+/// procedural `(define-macro NAME (lambda …))` form has a symbol, not a
+/// signature list, in the name position and is skipped.
+fn harvest_define_macro(items: &[Datum<'_>]) -> Option<FormSpec> {
+    let DatumKind::List {
+        items: sig, tail, ..
+    } = &items.get(1)?.kind
+    else {
+        return None;
     };
-    Some(FormSpec::new(name, leading, docstring, body, confidence))
+    let name = sig.first()?.as_symbol()?;
+    let (leading, _doc, mut body, matched) = classify_arglist_params(sig.get(1..)?);
+    if tail.is_some() {
+        body = true; // `. body` — the dotted tail is the remainder
+    }
+    let confidence = if matched {
+        Confidence::Inferred
+    } else {
+        Confidence::Weak
+    };
+    Some(FormSpec::new(
+        name,
+        leading,
+        Docstring::None,
+        body,
+        confidence,
+    ))
+}
+
+/// The defined name of a Scheme definition head argument: a bare symbol
+/// (`(define-syntax NAME …)`) or the head of a `(NAME …)` list (function-style
+/// `(define-syntax (NAME stx) …)`).
+fn scheme_def_name<'t>(datum: &Datum<'t>) -> Option<&'t str> {
+    match &datum.kind {
+        DatumKind::Symbol(s) => Some(s),
+        DatumKind::List { .. } => datum.items()?.first()?.as_symbol(),
+        _ => None,
+    }
+}
+
+/// The clause list of the first `syntax-rules` / `syntax-case` / `syntax-parse`
+/// form found in `d` (searched recursively, so a transformer wrapped in a
+/// `lambda` is reached). Returns that form's items; the caller isolates the real
+/// clauses as the items whose first element is itself a list (the pattern),
+/// which skips the header parts (the keyword, a custom ellipsis, the literal
+/// list, a `syntax-case`/`-parse` stx expression).
+fn find_transformer_clauses<'a, 't>(d: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
+    let DatumKind::List { items, .. } = &d.kind else {
+        return None;
+    };
+    if let Some(h) = items.first().and_then(Datum::as_symbol) {
+        if matches!(h, "syntax-rules" | "syntax-case" | "syntax-parse") {
+            return Some(items);
+        }
+    }
+    items.iter().find_map(find_transformer_clauses)
+}
+
+/// Classify a macro input pattern `(_ p …)` into leading roles, a body flag, and
+/// the count of positions that classified to a known role. Returns `None` if the
+/// pattern is not a list.
+fn classify_pattern(pattern: &Datum<'_>) -> Option<(Vec<Role>, bool, usize)> {
+    let params = pattern.items()?;
+    let mut leading = Vec::new();
+    let mut body = false;
+    let mut matched = 0usize;
+    // Skip index 0 — the macro-keyword slot (conventionally `_` or the name).
+    for p in params.iter().skip(1) {
+        match &p.kind {
+            DatumKind::Symbol("...") => {
+                // `X …`: the preceding element repeats — it is the body tail.
+                leading.pop();
+                body = true;
+                matched += 1;
+                break;
+            }
+            DatumKind::Symbol(s) => {
+                // Strip a `syntax-parse` syntax-class suffix (`name:id` → `name`).
+                let base = s.split(':').next().unwrap_or(s);
+                match classify_param(base) {
+                    Some(Role::Body) => {
+                        body = true;
+                        matched += 1;
+                        break;
+                    }
+                    Some(role) => {
+                        leading.push(role);
+                        matched += 1;
+                    }
+                    None => leading.push(Role::Other),
+                }
+            }
+            // A nested list in an argument position is an arglist-shaped
+            // sub-pattern (`(arg …)`).
+            DatumKind::List { .. } => {
+                leading.push(Role::Arglist);
+                matched += 1;
+            }
+            _ => leading.push(Role::Other),
+        }
+    }
+    Some((leading, body, matched))
 }
 
 // --- Bundled builtins ------------------------------------------------------
@@ -724,12 +1143,14 @@ impl Builtins {
 #[must_use]
 pub fn bundled_registry(dialect: Dialect) -> Registry {
     match dialect {
-        Dialect::Scheme
-        | Dialect::Guile
+        // Strict R7RS-small stays R7RS-faithful (ADR-0031).
+        Dialect::Scheme => scheme_builtins(),
+        // The extended family layers implementation-common forms on the core.
+        Dialect::Guile
         | Dialect::Gauche
         | Dialect::Mosh
         | Dialect::Gambit
-        | Dialect::SchemeSuperset => scheme_builtins(),
+        | Dialect::SchemeSuperset => scheme_extended_builtins(),
         Dialect::Racket => racket_builtins(),
         Dialect::CommonLisp => common_lisp_builtins(),
         Dialect::EmacsLisp => emacs_lisp_builtins(),
@@ -876,7 +1297,10 @@ fn emacs_lisp_builtins() -> Registry {
     b.reg
 }
 
-/// Scheme's core definition forms (R7RS). Scheme has no docstrings.
+/// Scheme's core definition forms (strict R7RS-small). Scheme has no docstrings
+/// (ADR-0031). Implementation-specific forms (GOOPS/Gauche `define-class`, …)
+/// live in [`scheme_extended_builtins`], not here, to keep strict `Scheme`
+/// R7RS-faithful.
 fn scheme_builtins() -> Registry {
     use Category::{Macro, Type};
     use Docstring::None as NoDoc;
@@ -887,10 +1311,48 @@ fn scheme_builtins() -> Registry {
     b.def("define-values", vec![Name], NoDoc, true, None);
     b.def("define-syntax", vec![Name], NoDoc, true, Some(Macro));
     b.def("define-record-type", vec![Name], NoDoc, true, Some(Type));
+    // R7RS library form; NAME may be a list `(foo bar)`, so no category.
+    b.def("define-library", vec![Name], NoDoc, true, None);
     b.reg
 }
 
-/// Racket's core: Scheme's plus `struct`.
+/// The extended Scheme family (Guile, Gauche, Mosh, Gambit, the `.scm`
+/// superset): the R7RS core plus the uncontested definition forms shared by
+/// Guile GOOPS and Gauche and common `.scm` code (ADR-0031). A spec fires only
+/// when its head appears, so forms absent from a given implementation never
+/// misfire (ADR-0030). `define-method` is deliberately omitted — its shape is
+/// not uniform (Gauche `(define-method name (args) …)` vs. Guile GOOPS
+/// `(define-method (name (a <c>) …) …)`) — and stays a consumer concern.
+fn scheme_extended_builtins() -> Registry {
+    use Category::{Class, Constant, Generic, Macro};
+    use Docstring::None as NoDoc;
+    use Role::{Name, Other};
+    let mut reg = scheme_builtins();
+    let mut b = Builtins::new();
+    // GOOPS/Gauche object system.
+    b.def("define-class", vec![Name], NoDoc, true, Some(Class));
+    b.def("define-generic", vec![Name], NoDoc, false, Some(Generic));
+    // Gauche `(define-constant name value)`.
+    b.def(
+        "define-constant",
+        vec![Name, Other],
+        NoDoc,
+        false,
+        Some(Constant),
+    );
+    // Gauche/Guile inlinable define — ambiguous like `define`, so no category.
+    b.def("define-inline", vec![Name], NoDoc, true, None);
+    // Guile/Racket shorthand macro; the first arg is the `(name pat…)` pattern.
+    b.def("define-syntax-rule", vec![Name], NoDoc, true, Some(Macro));
+    // Guile: optional/keyword-arg define and module-exporting define — both
+    // `define`-shaped and ambiguous, so no category.
+    b.def("define*", vec![Name], NoDoc, true, None);
+    b.def("define-public", vec![Name], NoDoc, true, None);
+    reg.merge(b.reg);
+    reg
+}
+
+/// Racket's core: Scheme's plus `struct` and `define-syntax-rule`.
 fn racket_builtins() -> Registry {
     let mut reg = scheme_builtins();
     reg.insert(
@@ -902,6 +1364,16 @@ fn racket_builtins() -> Registry {
             Confidence::Builtin,
         )
         .with_category(Category::Struct),
+    );
+    reg.insert(
+        FormSpec::new(
+            "define-syntax-rule",
+            vec![Role::Name],
+            Docstring::None,
+            true,
+            Confidence::Builtin,
+        )
+        .with_category(Category::Macro),
     );
     reg
 }
