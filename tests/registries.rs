@@ -67,6 +67,20 @@ fn racket_adds_struct_to_scheme_core() {
 }
 
 #[test]
+fn clojure_definline_is_function() {
+    let (head, cat) = annotate_head("(definline f [x] x)", Dialect::Clojure);
+    assert_eq!(head, "definline");
+    assert_eq!(cat, Some(Category::Function));
+}
+
+#[test]
+fn racket_define_public_is_method() {
+    let (head, cat) = annotate_head("(define/public (area) 1)", Dialect::Racket);
+    assert_eq!(head, "define/public");
+    assert_eq!(cat, Some(Category::Method));
+}
+
+#[test]
 fn scheme_core_has_define_library_but_not_goops() {
     // Strict R7RS-small stays R7RS-faithful (ADR-0031): `define-library` yes,
     // GOOPS/Gauche forms no.

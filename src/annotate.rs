@@ -1393,6 +1393,21 @@ fn racket_builtins() -> Registry {
         )
         .with_category(Category::Macro),
     );
+    // `class`-body method definers: `(define/public (name args…) body…)` or
+    // `(define/public name expr)` — the Name slot holds the `(name …)` head or
+    // the bare symbol, mirroring `define`.
+    for head in ["define/public", "define/private", "define/override"] {
+        reg.insert(
+            FormSpec::new(
+                head,
+                vec![Role::Name],
+                Docstring::None,
+                true,
+                Confidence::Builtin,
+            )
+            .with_category(Category::Method),
+        );
+    }
     reg
 }
 
@@ -1473,6 +1488,8 @@ fn clojure_builtins() -> Registry {
     // Kind-only per ADR-0020.
     b.def("deftype", vec![Name], NoDoc, true, None);
     b.def("deftest", vec![Name], NoDoc, true, Some(Test));
+    // Like `defn` but inlinable — still a function definition.
+    b.def("definline", vec![Name], Leading, true, Some(Function));
     // NAME [DOC] [ATTR-MAP] REFERENCES… — ubiquitous and unambiguous.
     b.def("ns", vec![Name], Leading, true, None);
     b.reg
