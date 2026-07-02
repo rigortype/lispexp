@@ -260,16 +260,86 @@ fn harvest_fennel_macro_head() {
 }
 
 #[test]
-fn harvest_scheme_family_has_no_defmacro_harvester() {
-    // Scheme macros use syntax-rules patterns, not an arglist — harvested by a
-    // separate mechanism (ADR-0031), so this harvester yields nothing.
+fn harvest_scheme_syntax_rules_pattern() {
+    // The syntax-rules pattern `(_ name (arg ...) body ...)` names and nests the
+    // roles: Name, Arglist, then a body tail (ADR-0031).
     let mut reg = Registry::new();
     let added = harvest_source_for(
-        "(define-syntax swap! (syntax-rules () ((_ a b) (let ((t a)) (set! a b) (set! b t)))))",
+        "(define-syntax define-test\n\
+           (syntax-rules ()\n\
+             ((_ name (arg ...) body ...) (define (name arg ...) body ...))))",
+        Dialect::Scheme,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("define-test").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name, Role::Arglist]);
+    assert!(spec.body);
+    assert_eq!(spec.docstring, Docstring::None); // Scheme has no docstrings
+    assert_eq!(spec.confidence, Confidence::Inferred);
+}
+
+#[test]
+fn harvest_scheme_syntax_rules_trailing_ellipsis_is_body() {
+    // `(_ name body ...)` → Name, then the repeated tail is the body.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(define-syntax defthing (syntax-rules () ((_ name body ...) (begin body ...))))",
+        Dialect::Scheme,
+        &mut reg,
+    );
+    let spec = reg.get("defthing").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_scheme_picks_richest_rule() {
+    // A multi-rule macro: the nullary `(_)` rule yields nothing; the richest
+    // rule wins.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(define-syntax my-def\n\
+           (syntax-rules ()\n\
+             ((_ name) (define name #f))\n\
+             ((_ name body ...) (define name (begin body ...)))))",
+        Dialect::Scheme,
+        &mut reg,
+    );
+    let spec = reg.get("my-def").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_scheme_skips_procedural_transformer() {
+    // `er-macro-transformer` carries no pattern — nothing to harvest (ADR-0031).
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(define-syntax my-macro (er-macro-transformer (lambda (form rename compare) form)))",
         Dialect::Scheme,
         &mut reg,
     );
     assert_eq!(added, 0);
+}
+
+#[test]
+fn harvest_scheme_end_to_end_annotates_use() {
+    // Harvest the macro, then annotate a *use* of it.
+    let mut reg = bundled_registry(Dialect::Scheme);
+    harvest_source_for(
+        "(define-syntax define-test\n\
+           (syntax-rules () ((_ name body ...) (define (name) body ...))))",
+        Dialect::Scheme,
+        &mut reg,
+    );
+    let data = parse("(define-test my-check (assert #t))", &Options::scheme()).data;
+    let a = annotate_form(&data[0], &reg).expect("annotated");
+    assert_eq!(
+        a.first(Role::Name).unwrap().kind,
+        DatumKind::Symbol("my-check")
+    );
+    assert!(a.all(Role::Body).count() >= 1);
 }
 
 #[test]

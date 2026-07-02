@@ -79,7 +79,12 @@ conservative-core / consumer-extensible ownership model (ADR-0020):
    harvester uses (`name`→Name, `arg`/`args`→Arglist, `body`→Body, …), emitting
    `Confidence::Inferred` specs. Procedural transformers yield no pattern and are
    left to weak signals only (naming conventions, template-expands-to-`define`).
-   Not implemented in this ADR; recorded so the harvest target is settled.
+
+   **Implemented** in `harvest_syntax_rules`, wired into `harvest_source_for`
+   for the Scheme family (ADR-0032): it reads each rule's input pattern, treats a
+   nested list as an `Arglist`-shaped sub-pattern and a trailing `X …` ellipsis
+   as the body tail, keeps the richest rule of a multi-rule macro, and skips
+   procedural transformers (`er-macro-transformer`, a lambda, …).
 
 ## Consequences
 

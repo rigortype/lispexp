@@ -612,25 +612,52 @@ pub fn harvest_source(source: &str, reg: &mut Registry) -> usize {
     harvest_source_for(source, Dialect::EmacsLisp, reg)
 }
 
-/// Harvest definition-form specs from `dialect` `source` into `reg` (ADR-0032).
+/// Whether `dialect` defines macros with `syntax-rules` patterns rather than an
+/// arglist — the Scheme family, harvested by [`harvest_syntax_rules`] (ADR-0031)
+/// rather than the arglist heuristic (ADR-0032).
+fn is_syntax_rules_dialect(dialect: Dialect) -> bool {
+    matches!(
+        dialect,
+        Dialect::Scheme
+            | Dialect::Guile
+            | Dialect::Gauche
+            | Dialect::Mosh
+            | Dialect::Gambit
+            | Dialect::SchemeSuperset
+            | Dialect::Racket
+    )
+}
+
+/// Harvest definition-form specs from `dialect` `source` into `reg`.
 ///
-/// For each top-level def-macro (`(defmacro NAME ARGLIST …)`, Fennel
-/// `(macro …)`, …), derives a [`FormSpec`] from the arglist parameter names —
-/// the highest-yield, most portable signal across macro-defining Lisps — plus,
-/// for Emacs Lisp, any `declare` metadata (`doc-string`, `debug (&define …)`).
+/// Two derivations, by dialect:
+/// - **Arglist heuristic (ADR-0032)** for the macro-defining Lisps whose
+///   def-macros carry an arglist (`(defmacro NAME ARGLIST …)`, Fennel
+///   `(macro …)`, …): roles come from the arglist parameter names — the
+///   highest-yield, most portable signal — plus, for Emacs Lisp, any `declare`
+///   metadata.
+/// - **`syntax-rules` pattern harvester (ADR-0031)** for the Scheme family:
+///   roles come from each rule's input pattern (`(_ name (arg …) body …)`),
+///   which names *and* nests the argument structure.
+///
 /// Returns the number of specs added; `0` for dialects with no harvestable
-/// def-macro form (the Scheme family, whose `syntax-rules` macros need the
-/// pattern harvester of ADR-0031, and EDN/AutoLISP).
+/// def-macro form (EDN and AutoLISP).
 pub fn harvest_source_for(source: &str, dialect: Dialect, reg: &mut Registry) -> usize {
-    let Some(profile) = harvest_profile(dialect) else {
-        return 0;
-    };
     let parsed = parse(source, &Options::for_dialect(dialect));
     let mut added = 0;
-    for datum in &parsed.data {
-        if let Some(spec) = harvest_defmacro(datum, &profile) {
-            reg.insert(spec);
-            added += 1;
+    if is_syntax_rules_dialect(dialect) {
+        for datum in &parsed.data {
+            if let Some(spec) = harvest_syntax_rules(datum) {
+                reg.insert(spec);
+                added += 1;
+            }
+        }
+    } else if let Some(profile) = harvest_profile(dialect) {
+        for datum in &parsed.data {
+            if let Some(spec) = harvest_defmacro(datum, &profile) {
+                reg.insert(spec);
+                added += 1;
+            }
         }
     }
     added
@@ -736,6 +763,120 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
         Docstring::None
     };
     Some(FormSpec::new(name, leading, docstring, body, confidence))
+}
+
+/// Harvest a [`FormSpec`] from a `(define-syntax NAME (syntax-rules …))` form
+/// by reading its rules' input patterns (ADR-0031).
+///
+/// Each rule is `(PATTERN TEMPLATE)`; the pattern `(_ name (arg …) body …)`
+/// names the argument roles and shows their nesting/repetition. Roles come from
+/// the pattern-variable names (via [`classify_param`]) — a nested list is an
+/// arglist-shaped sub-pattern (`Arglist`), and a trailing `X …` ellipsis marks
+/// the body. Procedural transformers (`er-macro-transformer`, a lambda, …)
+/// carry no pattern and are skipped. Scheme has no docstrings and the defined
+/// macro's category is unknown, so both are absent.
+fn harvest_syntax_rules(form: &Datum<'_>) -> Option<FormSpec> {
+    let (head, items) = list_head(form)?;
+    if head != "define-syntax" {
+        return None;
+    }
+    let name = match items.get(1)?.kind {
+        DatumKind::Symbol(s) => s,
+        _ => return None,
+    };
+    // The transformer must be `(syntax-rules …)`.
+    let (thead, titems) = list_head(items.get(2)?)?;
+    if thead != "syntax-rules" {
+        return None;
+    }
+    // syntax-rules args: an optional custom-ellipsis identifier, then the
+    // literal list, then the rules.
+    let mut idx = 1;
+    if matches!(titems.get(idx).map(|d| &d.kind), Some(DatumKind::Symbol(_))) {
+        idx += 1; // custom ellipsis
+    }
+    // Skip the literal list.
+    if !matches!(
+        titems.get(idx).map(|d| &d.kind),
+        Some(DatumKind::List { .. })
+    ) {
+        return None;
+    }
+    idx += 1;
+
+    // Derive a spec from each rule's pattern; keep the richest (most classified
+    // roles, then longest).
+    let mut best: Option<(Vec<Role>, bool, usize)> = None;
+    for rule in &titems[idx.min(titems.len())..] {
+        let Some(pattern) = rule.items().and_then(|r| r.first()) else {
+            continue;
+        };
+        let Some((leading, body, matched)) = classify_pattern(pattern) else {
+            continue;
+        };
+        let better = best.as_ref().map_or(true, |(bl, _, bm)| {
+            (matched, leading.len()) > (*bm, bl.len())
+        });
+        if better {
+            best = Some((leading, body, matched));
+        }
+    }
+
+    let (leading, body, matched) = best?;
+    let confidence = if matched > 0 {
+        Confidence::Inferred
+    } else {
+        Confidence::Weak
+    };
+    Some(FormSpec::new(
+        name,
+        leading,
+        Docstring::None,
+        body,
+        confidence,
+    ))
+}
+
+/// Classify a `syntax-rules` input pattern `(_ p …)` into leading roles, a body
+/// flag, and the count of positions that classified to a known role. Returns
+/// `None` if the pattern is not a list.
+fn classify_pattern(pattern: &Datum<'_>) -> Option<(Vec<Role>, bool, usize)> {
+    let params = pattern.items()?;
+    let mut leading = Vec::new();
+    let mut body = false;
+    let mut matched = 0usize;
+    // Skip index 0 — the macro-keyword slot (conventionally `_` or the name).
+    for p in params.iter().skip(1) {
+        match &p.kind {
+            DatumKind::Symbol("...") => {
+                // `X …`: the preceding element repeats — it is the body tail.
+                leading.pop();
+                body = true;
+                matched += 1;
+                break;
+            }
+            DatumKind::Symbol(s) => match classify_param(s) {
+                Some(Role::Body) => {
+                    body = true;
+                    matched += 1;
+                    break;
+                }
+                Some(role) => {
+                    leading.push(role);
+                    matched += 1;
+                }
+                None => leading.push(Role::Other),
+            },
+            // A nested list in an argument position is an arglist-shaped
+            // sub-pattern (`(arg …)`).
+            DatumKind::List { .. } => {
+                leading.push(Role::Arglist);
+                matched += 1;
+            }
+            _ => leading.push(Role::Other),
+        }
+    }
+    Some((leading, body, matched))
 }
 
 // --- Bundled builtins ------------------------------------------------------
