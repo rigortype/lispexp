@@ -45,7 +45,7 @@ _Avoid_: macro (alone — risks confusion with `defmacro`/`syntax-rules`-level c
 Whether a reader-macro form appeared in its shorthand token form (e.g. `'x`) or its explicit long-hand call form (e.g. `(quote x)`). lispexp preserves this distinction on `Prefixed` datums rather than normalizing it away, keeping future round-trip serialization feasible.
 
 **Improper list**:
-A list whose final tail is not the empty list — a dotted pair `(a . b)` or `(a b . c)`. Modeled as an ordinary List with a present dotted tail rather than a separate kind, so proper lists are the tail-absent special case.
+A list whose final tail is not the empty list — a dotted pair `(a . b)` or `(a b . c)`. Modeled as an ordinary List with a present dotted tail rather than a separate kind, so proper lists are the tail-absent special case. The `.` separator's own byte span is recorded alongside the tail (`dot: Option<Span>`, surfaced as `Datum::dot_span()`), so a text-based reindenter can align a tail continuation under the dot without re-scanning the source; `dot` is `Some` iff `tail` is `Some`.
 _Avoid_: dotted list (as a distinct type — it is the same List with a tail)
 
 **Hash literal**:

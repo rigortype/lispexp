@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `DatumKind::List` gains a fourth field, `dot: Option<Span>` — the byte span of the `.` separator of an improper/dotted list (`Some` iff `tail` is `Some`), also surfaced as the helper `Datum::dot_span()`. A text-based reindenter needs the dot's column to align a tail continuation under it (the `'(eval . FORM)` idiom), which `tail` alone can't give; recording the span the reader already consumes avoids a source re-scan (ADR-0009). This breaks exhaustive `List { delim, items, tail }` patterns and constructions — add the field or `..`. `DatumKind` remains exhaustive by design (walkers and formatters want a compiler-forced arm per kind), so the field is added outright rather than behind `#[non_exhaustive]`.
+
 ## [0.4.0] - 2026-07-02
 
 A code-vs-data walker release. The pruning walker learns to tell data you can safely skip from a quasiquote template you can't, gains a fixed-policy iterator over just the code nodes, and the definition annotator is rebuilt on that walker — fixing a class of silently-missed definitions. All changes are backward-compatible; `walk` and `Class` are unchanged.

@@ -27,6 +27,12 @@ pub enum DatumKind<'a> {
         items: Vec<Datum<'a>>,
         /// The dotted tail, present only for an improper list `(a . b)`.
         tail: Option<Box<Datum<'a>>>,
+        /// Byte span of the `.` separator, present only for an improper list.
+        /// A text-based reindenter needs the dot's column to align a tail
+        /// continuation under it (the `'(eval . FORM)` font-lock idiom), which
+        /// `tail` alone can't give (ADR-0009). `Some` iff `tail` is `Some`; see
+        /// [`Datum::dot_span`].
+        dot: Option<Span>,
     },
     /// A symbol; verbatim slice, including enclosing `|bars|` if piped.
     ///
@@ -155,6 +161,17 @@ impl<'a> Datum<'a> {
     /// item is a symbol.
     pub fn head_symbol(&self) -> Option<&'a str> {
         self.items()?.first()?.as_symbol()
+    }
+
+    /// The byte span of the `.` separator, if this is an improper/dotted list
+    /// `(a . b)`. `None` for a proper list or any non-list. Lets a text-based
+    /// consumer (e.g. a reindenter) find the dot's column without re-scanning
+    /// the source between the last item and the tail.
+    pub fn dot_span(&self) -> Option<Span> {
+        match &self.kind {
+            DatumKind::List { dot, .. } => *dot,
+            _ => None,
+        }
     }
 
     /// This datum's source text — sugar for `self.span.text(source)`.
