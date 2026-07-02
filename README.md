@@ -1,6 +1,13 @@
 # Lisp S-Expressions Parser (lispexp)
 
+[![Crates.io](https://img.shields.io/crates/v/lispexp.svg)](https://crates.io/crates/lispexp)
+[![docs.rs](https://img.shields.io/docsrs/lispexp)](https://docs.rs/lispexp/latest/lispexp/)
+[![License](https://img.shields.io/github/license/rigortype/lispexp)](https://github.com/rigortype/lispexp/blob/master/LICENSE)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rigortype/lispexp)
+
 A pure-Rust **reader** (lexer + parser) for S-expression syntax across many Lisp-family dialects, producing a faithful, position-annotated, code-vs-data-aware parse tree.
+
+📖 **API documentation:** <https://docs.rs/lispexp/latest/lispexp/>
 
 lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or interpret the numeric tower. It reads source text into data — the shape, positions, and reader-macro structure needed to statically analyze Lisp code.
 
@@ -58,7 +65,7 @@ lispexp never infers a dialect across files or models the numeric tower: pick a 
 
 ## Documentation
 
-API docs are on [docs.rs](https://docs.rs/lispexp). The design is recorded in [`docs/design.md`](docs/design.md), the domain vocabulary in [`CONTEXT.md`](CONTEXT.md), and the decisions behind it in the ADRs under [`docs/adr/`](docs/adr/).
+The full API reference is on docs.rs: <https://docs.rs/lispexp/latest/lispexp/>. The design is recorded in [`docs/design.md`](docs/design.md), the domain vocabulary in [`CONTEXT.md`](CONTEXT.md), and the decisions behind it in the ADRs under [`docs/adr/`](docs/adr/).
 
 ## Copyright
 
