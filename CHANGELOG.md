@@ -15,6 +15,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - `walk`'s rustdoc example no longer demonstrates `Skip`-on-`Class::Data` (a footgun that only happened to be safe for its sealed example data); it now shows the descend-and-count idiom and points to `walk_regions` for safe pruning.
+- `annotate_tree` now descends via the code-vs-data walker (`code_nodes`) instead of a hand-rolled "recurse into lists only" rule, so its traversal and the walker's classification can't diverge.
+
+### Fixed
+
+- `annotate_tree` no longer misses a definition guarded by a reader/feature conditional (`#+sbcl (defun …)`), wrapped in metadata, or unquoted inside a quasiquote (`` `(… ,(defun …)) ``): the old descent recursed only into `List` children and never into the `Prefixed` wrapper, so any definition reachable only through a prefix in code position was silently dropped. A quoted `'(defun …)` or a quasiquote *template* stays correctly un-annotated (it is inert data).
 
 ## [0.3.0] - 2026-07-02
 

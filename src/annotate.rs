@@ -57,6 +57,7 @@ use std::collections::HashMap;
 use crate::datum::{Datum, DatumKind, Delim, Prefix};
 use crate::options::{Dialect, Options};
 use crate::reader::parse;
+use crate::walk::code_nodes;
 
 /// The role of an argument within a definition form.
 ///
@@ -555,26 +556,22 @@ fn is_name_shaped(datum: &Datum<'_>) -> bool {
     }
 }
 
-/// Recursively annotate every definition form in `data`, in source order
-/// (outer forms before the inner forms they contain).
+/// Annotate every definition form reachable in *code* position in `data`, in
+/// source order (outer forms before the inner forms they contain).
+///
+/// Descent follows the code-vs-data walker ([`crate::walk::code_nodes`], ADR-0026)
+/// rather than a hand-rolled "recurse into lists" rule: a form is reached iff it
+/// is code, so a definition guarded by a reader/feature conditional
+/// (`#+sbcl (defun …)`), wrapped in metadata, or unquoted inside a quasiquote is
+/// annotated — while a *quoted* form (`'(defun …)`) or a quasiquote *template*
+/// (`` `(defun …) ``) is inert data and correctly skipped. `annotate_form` is a
+/// no-op on the non-list wrapper nodes the walker also visits, so they pass
+/// through harmlessly.
 #[must_use]
 pub fn annotate_tree<'a, 't>(data: &'a [Datum<'t>], reg: &Registry) -> Vec<Annotated<'a, 't>> {
-    let mut out = Vec::new();
-    for datum in data {
-        collect(datum, reg, &mut out);
-    }
-    out
-}
-
-fn collect<'a, 't>(datum: &'a Datum<'t>, reg: &Registry, out: &mut Vec<Annotated<'a, 't>>) {
-    if let Some(annotated) = annotate_form(datum, reg) {
-        out.push(annotated);
-    }
-    if let DatumKind::List { items, .. } = &datum.kind {
-        for item in items {
-            collect(item, reg, out);
-        }
-    }
+    code_nodes(data)
+        .filter_map(|datum| annotate_form(datum, reg))
+        .collect()
 }
 
 // --- Harvester (Emacs Lisp) ------------------------------------------------

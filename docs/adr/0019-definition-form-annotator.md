@@ -42,7 +42,13 @@ reader's `Datum` tree — parallel to the parser, not part of it — in two part
    children against that form's spec and tags them with their roles, so a
    consumer can read `(cl-defun foo (x) "doc" body…)` as name=`foo`,
    arglist=`(x)`, docstring=`"doc"`, body=`body…` without knowing `cl-defun`
-   specifically.
+   specifically. `annotate_tree`'s tree descent follows the code-vs-data walker
+   (ADR-0026, via `code_nodes`) rather than a bespoke "recurse into lists" rule:
+   a form is annotated iff it sits in *code* position, so a definition guarded by
+   a reader/feature conditional (`#+sbcl (defun …)`) or unquoted inside a
+   quasiquote is reached, while a quoted form or a quasiquote template is inert
+   data and skipped. This keeps the annotator from re-deriving — and diverging
+   from — the reader's own quote/quasiquote semantics.
 
 ## Heuristic sources (empirical, from `~/.emacs.d/elpa`)
 
