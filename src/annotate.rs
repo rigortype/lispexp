@@ -796,7 +796,9 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
 /// Classify a def-macro arglist's parameter names into `(leading roles,
 /// docstring-named, body, matched-any-known-role)`. Lambda-list markers are
 /// `&`-prefixed in every arglist-style dialect (`&rest`/`&body`/`&` open the
-/// body; any other `&…` or ISLisp `:rest` is a non-role marker to skip).
+/// body; any other `&…` or ISLisp `:rest` is a non-role marker to skip). Hy's
+/// rest parameters are instead written `#* args` / `#** kwargs`, which read as a
+/// `#`-tagged datum wrapping the name.
 fn classify_arglist_params(params: &[Datum<'_>]) -> (Vec<Role>, bool, bool, bool) {
     let mut leading = Vec::new();
     let mut docstring = false;
@@ -805,6 +807,22 @@ fn classify_arglist_params(params: &[Datum<'_>]) -> (Vec<Role>, bool, bool, bool
     let mut rest = false;
 
     for p in params {
+        // Hy `#* args` / `#** kwargs`: a rest/keyword-rest parameter — the
+        // remainder is the body.
+        if let DatumKind::HashLiteral {
+            tag: "*" | "**",
+            inner: Some(inner),
+        } = &p.kind
+        {
+            if let DatumKind::Symbol(nm) = inner.kind {
+                if classify_param(nm).is_some() {
+                    matched_any = true;
+                }
+            }
+            body = true;
+            rest = true;
+            continue;
+        }
         let DatumKind::Symbol(pname) = p.kind else {
             continue;
         };
@@ -1375,6 +1393,21 @@ fn racket_builtins() -> Registry {
         )
         .with_category(Category::Macro),
     );
+    // `class`-body method definers: `(define/public (name args…) body…)` or
+    // `(define/public name expr)` — the Name slot holds the `(name …)` head or
+    // the bare symbol, mirroring `define`.
+    for head in ["define/public", "define/private", "define/override"] {
+        reg.insert(
+            FormSpec::new(
+                head,
+                vec![Role::Name],
+                Docstring::None,
+                true,
+                Confidence::Builtin,
+            )
+            .with_category(Category::Method),
+        );
+    }
     reg
 }
 
@@ -1383,12 +1416,14 @@ fn racket_builtins() -> Registry {
 /// `defclass`/`defgeneric`/`define-condition` document via a
 /// `(:documentation …)` option, not a positional string.
 fn common_lisp_builtins() -> Registry {
-    use Category::{Class, Constant, Function, Generic, Macro, Method, Struct, Variable};
+    use Category::{Class, Constant, Function, Generic, Macro, Method, Struct, Type, Variable};
     use Docstring::{Leading, LeadingOrLone, None as NoDoc};
     use Role::{Arglist, Name, Other};
     let mut b = Builtins::new();
     b.def("defun", vec![Name, Arglist], Leading, true, Some(Function));
     b.def("defmacro", vec![Name, Arglist], Leading, true, Some(Macro));
+    // NAME LAMBDA-LIST [DOC] BODY… — a type specifier (CLHS allows a docstring).
+    b.def("deftype", vec![Name, Arglist], Leading, true, Some(Type));
     b.def(
         "defgeneric",
         vec![Name, Arglist],
@@ -1453,6 +1488,8 @@ fn clojure_builtins() -> Registry {
     // Kind-only per ADR-0020.
     b.def("deftype", vec![Name], NoDoc, true, None);
     b.def("deftest", vec![Name], NoDoc, true, Some(Test));
+    // Like `defn` but inlinable — still a function definition.
+    b.def("definline", vec![Name], Leading, true, Some(Function));
     // NAME [DOC] [ATTR-MAP] REFERENCES… — ubiquitous and unambiguous.
     b.def("ns", vec![Name], Leading, true, None);
     b.reg

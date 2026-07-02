@@ -33,6 +33,13 @@ fn common_lisp_defclass_is_class() {
 }
 
 #[test]
+fn common_lisp_deftype_is_type() {
+    let (head, cat) = annotate_head("(deftype id () t)", Dialect::CommonLisp);
+    assert_eq!(head, "deftype");
+    assert_eq!(cat, Some(Category::Type));
+}
+
+#[test]
 fn scheme_define_syntax_is_macro() {
     let (_, cat) = annotate_head("(define-syntax swap! (syntax-rules () ))", Dialect::Scheme);
     assert_eq!(cat, Some(Category::Macro));
@@ -57,6 +64,20 @@ fn racket_adds_struct_to_scheme_core() {
     assert!(reg.get("struct").is_some());
     assert!(reg.get("define-syntax-rule").is_some());
     assert!(reg.get("define-syntax").is_some()); // inherited from Scheme
+}
+
+#[test]
+fn clojure_definline_is_function() {
+    let (head, cat) = annotate_head("(definline f [x] x)", Dialect::Clojure);
+    assert_eq!(head, "definline");
+    assert_eq!(cat, Some(Category::Function));
+}
+
+#[test]
+fn racket_define_public_is_method() {
+    let (head, cat) = annotate_head("(define/public (area) 1)", Dialect::Racket);
+    assert_eq!(head, "define/public");
+    assert_eq!(cat, Some(Category::Method));
 }
 
 #[test]

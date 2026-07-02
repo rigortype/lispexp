@@ -355,6 +355,22 @@ fn harvest_clojure_style_indent_defn_keyword_is_body() {
 }
 
 #[test]
+fn harvest_hy_hash_star_rest_is_body() {
+    // Hy writes rest params as `#* body`, which read as a `#`-tagged datum, not
+    // a `&`-marked symbol.
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(defmacro defthing [name #* body] name)",
+        Dialect::Hy,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("defthing").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
 fn harvest_fennel_macro_head() {
     // Fennel defines macros with `macro`, not `defmacro` (ADR-0032).
     let mut reg = Registry::new();
