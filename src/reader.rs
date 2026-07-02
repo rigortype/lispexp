@@ -434,6 +434,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                     delim,
                     items: Vec::new(),
                     tail: None,
+                    dot: None,
                 },
                 span: Span::new(open.start, end),
                 line,
@@ -442,6 +443,8 @@ impl<'a, 'o> Parser<'a, 'o> {
 
         let mut items: Vec<Datum<'a>> = Vec::new();
         let mut tail: Option<Box<Datum<'a>>> = None;
+        // Span of the `.` before the final tail; kept in lockstep with `tail`.
+        let mut dot: Option<Span> = None;
         let end;
 
         loop {
@@ -483,7 +486,10 @@ impl<'a, 'o> Parser<'a, 'o> {
                         items.push(*prev_tail);
                     }
                     match self.parse_datum() {
-                        Some(d) => tail = Some(Box::new(d)),
+                        Some(d) => {
+                            tail = Some(Box::new(d));
+                            dot = Some(t.span); // the `.` for this final tail
+                        }
                         None => self.error(t.span, ErrorKind::DanglingDot),
                     }
                     // The loop continues; the next token should be the close.
@@ -503,6 +509,7 @@ impl<'a, 'o> Parser<'a, 'o> {
                                 self.error(d.span, ErrorKind::ItemAfterDottedTail);
                             }
                             items.push(*prev_tail);
+                            dot = None; // the tail was folded away; no dot now
                         }
                         items.push(d);
                     }
@@ -520,7 +527,12 @@ impl<'a, 'o> Parser<'a, 'o> {
 
         self.depth -= 1;
         let datum = Datum {
-            kind: DatumKind::List { delim, items, tail },
+            kind: DatumKind::List {
+                delim,
+                items,
+                tail,
+                dot,
+            },
             span: Span::new(open.start, end),
             line,
         };
@@ -598,6 +610,7 @@ fn fold_longhand<'a>(datum: Datum<'a>, opts: &Options) -> Datum<'a> {
             delim: Delim::Round,
             mut items,
             tail: None,
+            dot: _, // proper list (tail: None) ⇒ dot is None
         } if items.len() == 2 => {
             if let DatumKind::Symbol(s) = items[0].kind {
                 if let Some(prefix) = quote_symbol(s, opts) {
@@ -619,6 +632,7 @@ fn fold_longhand<'a>(datum: Datum<'a>, opts: &Options) -> Datum<'a> {
                     delim: Delim::Round,
                     items,
                     tail: None,
+                    dot: None,
                 },
                 span: datum.span,
                 line: datum.line,

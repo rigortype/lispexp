@@ -51,7 +51,10 @@ fn strings_and_chars_and_bools() {
 fn nested_list() {
     let data = scheme("(define (f x) (* x x))");
     assert_eq!(data.len(), 1);
-    let DatumKind::List { delim, items, tail } = &data[0].kind else {
+    let DatumKind::List {
+        delim, items, tail, ..
+    } = &data[0].kind
+    else {
         panic!("expected list");
     };
     assert_eq!(*delim, Delim::Round);
@@ -84,6 +87,49 @@ fn dotted_pair() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].kind, DatumKind::Symbol("a"));
     assert_eq!(tail.as_ref().unwrap().kind, DatumKind::Symbol("b"));
+}
+
+#[test]
+fn dotted_pair_records_dot_span() {
+    let src = "(a . b)";
+    let data = scheme(src);
+    // The `.` separator span is surfaced (ADR-0009), so a text-based consumer
+    // can align a tail continuation under the dot without re-scanning source.
+    let dot = data[0].dot_span().expect("dotted list has a dot span");
+    assert_eq!(dot.text(src), ".");
+    assert_eq!(&src[dot.start as usize..dot.end as usize], ".");
+    // The field and the helper agree.
+    let DatumKind::List { dot: field, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert_eq!(*field, Some(dot));
+}
+
+#[test]
+fn proper_list_has_no_dot_span() {
+    let data = scheme("(a b c)");
+    assert_eq!(data[0].dot_span(), None);
+    let DatumKind::List { dot, tail, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert!(dot.is_none());
+    assert!(tail.is_none());
+}
+
+#[test]
+fn non_list_has_no_dot_span() {
+    let data = scheme("sym");
+    assert_eq!(data[0].dot_span(), None);
+}
+
+#[test]
+fn dot_span_points_at_the_dot_column() {
+    // The reindentation motivation: the dot can sit far from the car.
+    let src = "(eval    .   form)";
+    let data = scheme(src);
+    let dot = data[0].dot_span().unwrap();
+    assert_eq!(dot.text(src), ".");
+    assert_eq!(dot.start as usize, src.find('.').unwrap());
 }
 
 #[test]
