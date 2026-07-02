@@ -77,10 +77,17 @@ mechanism (`annotate_form`) was already dialect-agnostic and is unchanged.
 - The heuristic remains best-effort: an author whose arglist uses unconventional
   parameter names gets a `Weak`/partial spec, never a fabricated one — same
   contract as ADR-0019.
-- Two derivation gaps remain, both recorded rather than half-built: the Scheme
-  `syntax-rules` pattern harvester (ADR-0031), and Clojure's richer in-source
-  metadata (`:arglists`/`:style/indent`), which a future metadata-map harvester
-  could read for higher confidence than parameter names alone.
+- Both once-deferred derivations are now implemented: the Scheme `syntax-rules`
+  pattern harvester (ADR-0031), and Clojure's `:arglists` metadata refinement.
+  The latter reads the arglist from a `^{…}` reader-metadata map on the name or
+  an attr-map before the arglist, classifies it, and — when it names known roles
+  — overrides the raw parameter-vector spec with `Confidence::Declared` (the
+  analog of elisp `declare`), since an author-supplied `:arglists` is the
+  authoritative call shape. This also motivated a robust arglist search (skip a
+  leading docstring string and attr-map), which additionally fixes documented
+  Clojure/Janet macros whose docstring precedes the arglist. `:style/indent`
+  remains available for a future body-boundary refinement but names no roles, so
+  it is lower-value than `:arglists`.
 - Only Emacs Lisp's builtins are bundled from harvesting; other families' bundled
   cores stay hand-authored (ADR-0020), with harvesting reserved for consumers'
   project-local macros.

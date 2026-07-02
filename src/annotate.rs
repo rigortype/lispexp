@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 
-use crate::datum::{Datum, DatumKind, Delim};
+use crate::datum::{Datum, DatumKind, Delim, Prefix};
 use crate::options::{Dialect, Options};
 use crate::reader::parse;
 
@@ -579,6 +579,9 @@ struct HarvestProfile {
     /// Whether to refine the spec with elisp `declare` metadata in the body
     /// (`doc-string`, `debug (&define …)`) — Emacs Lisp only.
     use_declare: bool,
+    /// Whether to refine the spec with Clojure `:arglists` metadata (a `^{…}`
+    /// map on the name or an attr-map before the arglist) — Clojure/Phel only.
+    clojure_meta: bool,
 }
 
 /// The harvest profile for `dialect`, or `None` if its macros are not
@@ -587,20 +590,21 @@ struct HarvestProfile {
 /// EDN and AutoLISP have no user macros.
 fn harvest_profile(dialect: Dialect) -> Option<HarvestProfile> {
     use Docstring::{Leading, LeadingOrLone, None as NoDoc};
-    let profile = |macro_heads, doc_policy, use_declare| HarvestProfile {
+    let profile = |macro_heads, doc_policy, use_declare, clojure_meta| HarvestProfile {
         macro_heads,
         doc_policy,
         use_declare,
+        clojure_meta,
     };
     Some(match dialect {
-        Dialect::EmacsLisp => profile(&["defmacro", "cl-defmacro"], LeadingOrLone, true),
-        Dialect::CommonLisp => profile(&["defmacro"], Leading, false),
-        Dialect::Clojure | Dialect::Phel => profile(&["defmacro"], Leading, false),
-        Dialect::Fennel => profile(&["macro"], Leading, false),
-        Dialect::Janet => profile(&["defmacro", "defmacro-"], Leading, false),
-        Dialect::Hy => profile(&["defmacro"], LeadingOrLone, false),
-        Dialect::Lfe => profile(&["defmacro"], Leading, false),
-        Dialect::Islisp => profile(&["defmacro"], NoDoc, false),
+        Dialect::EmacsLisp => profile(&["defmacro", "cl-defmacro"], LeadingOrLone, true, false),
+        Dialect::CommonLisp => profile(&["defmacro"], Leading, false, false),
+        Dialect::Clojure | Dialect::Phel => profile(&["defmacro"], Leading, false, true),
+        Dialect::Fennel => profile(&["macro"], Leading, false, false),
+        Dialect::Janet => profile(&["defmacro", "defmacro-"], Leading, false, false),
+        Dialect::Hy => profile(&["defmacro"], LeadingOrLone, false, false),
+        Dialect::Lfe => profile(&["defmacro"], Leading, false, false),
+        Dialect::Islisp => profile(&["defmacro"], NoDoc, false, false),
         _ => return None,
     })
 }
@@ -668,17 +672,112 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
     if !profile.macro_heads.contains(&head) {
         return None;
     }
-    // items: [defmacro, NAME, ARGLIST, body...]. The arglist is a `()` list
-    // (CL/elisp/ISLisp/LFE) or a `[]` vector (Clojure/Fennel/Janet/Hy) — both
-    // are `DatumKind::List` of some delimiter shape.
-    let name = match items.get(1)?.kind {
-        DatumKind::Symbol(s) => s,
+    // The name is a symbol, possibly wrapped in Clojure `^{…}` reader metadata
+    // (`(defmacro ^{:style/indent 1} name …)`), in which case the metadata map
+    // rides along as `arg`.
+    let name_datum = items.get(1)?;
+    let (name, name_meta) = match &name_datum.kind {
+        DatumKind::Symbol(s) => (*s, None),
+        DatumKind::Prefixed {
+            prefix: Prefix::Meta,
+            inner,
+            arg,
+            ..
+        } => match inner.kind {
+            DatumKind::Symbol(s) => (s, arg.as_deref()),
+            _ => return None,
+        },
         _ => return None,
     };
-    let DatumKind::List { items: params, .. } = &items.get(2)?.kind else {
+
+    // Find the arglist: the first list-shaped item after the name, skipping a
+    // leading docstring string and/or Clojure attr-map — CL/elisp/ISLisp/LFE
+    // put neither before the arglist, but Clojure/Janet put the docstring (and
+    // Clojure an attr-map) first. The arglist is a `()` list or a `[]` vector,
+    // both `DatumKind::List`.
+    let mut idx = 2;
+    let mut attr_map = None;
+    while let Some(item) = items.get(idx) {
+        match &item.kind {
+            DatumKind::Str(_) => idx += 1, // docstring-before-arglist
+            DatumKind::List {
+                delim: Delim::Curly,
+                ..
+            } => {
+                attr_map = Some(item);
+                idx += 1; // Clojure attr-map
+            }
+            _ => break,
+        }
+    }
+    let DatumKind::List { items: params, .. } = &items.get(idx)?.kind else {
         return None;
     };
 
+    let (mut leading, mut docstring, mut body, mut matched_any) = classify_arglist_params(params);
+
+    // Refine with elisp `declare` metadata in the body (Emacs Lisp only).
+    let mut declared = false;
+    if profile.use_declare {
+        for item in &items[(idx + 1).min(items.len())..] {
+            if let Some(("declare", decl_items)) = list_head(item) {
+                for spec in &decl_items[1..] {
+                    if let Some((key, _)) = list_head(spec) {
+                        match key {
+                            "doc-string" => {
+                                docstring = true;
+                                declared = true;
+                            }
+                            "debug" => declared = true, // often (&define …)
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Refine with Clojure `:arglists` metadata — the authoritative call shape
+    // when an author overrides it (ADR-0032), the direct analog of elisp
+    // `declare`. Look in the `^{…}` name metadata and the attr-map.
+    if profile.clojure_meta {
+        if let Some(arglist) = name_meta
+            .and_then(clojure_arglists)
+            .or_else(|| attr_map.and_then(clojure_arglists))
+        {
+            let (l, doc, b, matched) = classify_arglist_params(arglist);
+            if matched {
+                leading = l;
+                docstring = doc;
+                body = b;
+                matched_any = true;
+                declared = true;
+            }
+        }
+    }
+
+    let confidence = if declared {
+        Confidence::Declared
+    } else if matched_any {
+        Confidence::Inferred
+    } else {
+        Confidence::Weak
+    };
+
+    // Apply the dialect's docstring policy only when a doc parameter was named.
+    let docstring = if docstring {
+        profile.doc_policy
+    } else {
+        Docstring::None
+    };
+    Some(FormSpec::new(name, leading, docstring, body, confidence))
+}
+
+/// Classify a def-macro arglist's parameter names into `(leading roles,
+/// docstring-named, body, matched-any-known-role)`. Lambda-list markers are
+/// `&`-prefixed in every arglist-style dialect (`&rest`/`&body`/`&` open the
+/// body; any other `&…` or ISLisp `:rest` is a non-role marker to skip).
+fn classify_arglist_params(params: &[Datum<'_>]) -> (Vec<Role>, bool, bool, bool) {
     let mut leading = Vec::new();
     let mut docstring = false;
     let mut body = false;
@@ -689,10 +788,6 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
         let DatumKind::Symbol(pname) = p.kind else {
             continue;
         };
-        // Lambda-list markers are `&`-prefixed in every one of these dialects
-        // (elisp/CL `&rest`/`&body`/`&optional`, Clojure/Janet `&`/`&opt`, …):
-        // `&rest`/`&body`/`&` open the remainder, any other `&…` (or ISLisp's
-        // `:rest`) is a non-role marker to skip.
         if matches!(pname, "&rest" | "&body" | "&") {
             rest = true;
             continue;
@@ -701,7 +796,7 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
             continue;
         }
         if rest {
-            // The &rest param stands for the remainder, never one fixed slot —
+            // The rest param stands for the remainder, never one fixed slot —
             // whatever its name classifies as, the remainder is the body.
             if classify_param(pname).is_some() {
                 matched_any = true;
@@ -726,43 +821,41 @@ fn harvest_defmacro(form: &Datum<'_>, profile: &HarvestProfile) -> Option<FormSp
             None => leading.push(Role::Other),
         }
     }
+    (leading, docstring, body, matched_any)
+}
 
-    // Refine with elisp `declare` metadata in the body (Emacs Lisp only).
-    let mut declared = false;
-    if profile.use_declare {
-        for item in &items[3.min(items.len())..] {
-            if let Some(("declare", decl_items)) = list_head(item) {
-                for spec in &decl_items[1..] {
-                    if let Some((key, _)) = list_head(spec) {
-                        match key {
-                            "doc-string" => {
-                                docstring = true;
-                                declared = true;
-                            }
-                            "debug" => declared = true, // often (&define …)
-                            _ => {}
-                        }
-                    }
-                }
+/// The first arglist vector of a Clojure `:arglists` metadata value, if `meta`
+/// is a `{…}` map carrying one. The value is `'([params…] …)` (a quoted list of
+/// vectors) or a bare list; this returns the params of its first vector.
+fn clojure_arglists<'a, 't>(meta: &'a Datum<'t>) -> Option<&'a [Datum<'t>]> {
+    let DatumKind::List {
+        delim: Delim::Curly,
+        items,
+        ..
+    } = &meta.kind
+    else {
+        return None;
+    };
+    // A map is a flat key/value sequence; find the `:arglists` value.
+    let mut value = None;
+    for pair in items.chunks(2) {
+        if let [key, val] = pair {
+            if matches!(key.kind, DatumKind::Keyword(":arglists")) {
+                value = Some(val);
+                break;
             }
         }
     }
-
-    let confidence = if declared {
-        Confidence::Declared
-    } else if matched_any {
-        Confidence::Inferred
-    } else {
-        Confidence::Weak
+    // Unwrap a leading quote (`'(…)`), then take the first arglist vector.
+    let list = match &value?.kind {
+        DatumKind::Prefixed {
+            prefix: Prefix::Quote,
+            inner,
+            ..
+        } => inner.as_ref(),
+        _ => value?,
     };
-
-    // Apply the dialect's docstring policy only when a doc parameter was named.
-    let docstring = if docstring {
-        profile.doc_policy
-    } else {
-        Docstring::None
-    };
-    Some(FormSpec::new(name, leading, docstring, body, confidence))
+    list.items()?.first()?.items()
 }
 
 /// Harvest a [`FormSpec`] from a `(define-syntax NAME (syntax-rules …))` form

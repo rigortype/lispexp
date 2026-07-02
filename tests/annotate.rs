@@ -247,6 +247,54 @@ fn harvest_clojure_defmacro_vector_arglist() {
 }
 
 #[test]
+fn harvest_clojure_docstring_before_arglist() {
+    // Clojure puts the docstring *before* the arglist; the harvester skips it
+    // to find the params (ADR-0032).
+    let mut reg = Registry::new();
+    let added = harvest_source_for(
+        "(defmacro defwidget \"A widget.\" [name & body] `(def ~name ~@body))",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    assert_eq!(added, 1);
+    let spec = reg.get("defwidget").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+}
+
+#[test]
+fn harvest_clojure_arglists_metadata_is_authoritative() {
+    // `:arglists` overrides the (uninformative) param vector and is Declared
+    // provenance — the analog of elisp `declare` (ADR-0032).
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(defmacro deftask {:arglists '([name docstring & body])} [& args] `(do ~@args))",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    let spec = reg.get("deftask").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert_eq!(spec.docstring, Docstring::Leading);
+    assert!(spec.body);
+    assert_eq!(spec.confidence, Confidence::Declared);
+}
+
+#[test]
+fn harvest_clojure_reader_metadata_on_name() {
+    // `^{:arglists …}` reader metadata rides on the name symbol.
+    let mut reg = Registry::new();
+    harvest_source_for(
+        "(defmacro ^{:arglists '([name & body])} defthing [& args] nil)",
+        Dialect::Clojure,
+        &mut reg,
+    );
+    let spec = reg.get("defthing").expect("harvested");
+    assert_eq!(spec.leading, vec![Role::Name]);
+    assert!(spec.body);
+    assert_eq!(spec.confidence, Confidence::Declared);
+}
+
+#[test]
 fn harvest_fennel_macro_head() {
     // Fennel defines macros with `macro`, not `defmacro` (ADR-0032).
     let mut reg = Registry::new();
