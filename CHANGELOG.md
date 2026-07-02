@@ -6,9 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-02
+
+This release carries the definition annotator beyond Emacs Lisp. The spec harvester now learns a project's *own* definition macros in every dialect it can — from an arglist, a Clojure metadata map, or a Scheme macro pattern — the bundled per-dialect registries grow to cover more standard def-forms, and the crate's user-facing documentation is filled out. All changes are backward-compatible.
+
 ### Added
 
+- `annotate::harvest_source_for(source, dialect, reg)`: the spec harvester, previously Emacs-Lisp-only, now derives definition-form specs from a project's own def-macros across every macro-defining Lisp; `harvest_source` becomes a shorthand for the `Dialect::EmacsLisp` case (ADR-0031, ADR-0032).
+  - Arglist-name harvesting for Common Lisp, Clojure/Phel, Fennel, Janet, Hy (including its `#* args` / `#** kwargs` rest parameters), LFE, and ISLisp, driven by a per-dialect harvest profile; Emacs Lisp keeps its extra `declare` refinement.
+  - Scheme-family pattern harvesting: reads the defined macro's input pattern from `syntax-rules`, `define-syntax-rule`, and `syntax-case` / `syntax-parse` transformers (found anywhere in the transformer expression, with `name:id` syntax-class suffixes stripped), plus the legacy non-hygienic `define-macro`.
+  - Clojure metadata refinement: an `:arglists` map (from `^{…}` name metadata or an attr-map) overrides the parameter-name guess with `Confidence::Declared` (the analog of elisp `declare`), and `:style/indent` (an integer, `:defn`/`:form`, or a nested `[n …]`) sets the body boundary (the analog of elisp `(indent N)`).
+- Larger bundled definition registries (`bundled_registry`, ADR-0031, ADR-0020): strict `Scheme` adds `define-library`; the extended Scheme family (Guile/Gauche/Mosh/Gambit/superset) adds `define-class`, `define-generic`, `define-constant`, `define-inline`, `define-syntax-rule`, `define*`, and `define-public`; Racket adds `define-syntax-rule` and the class method definers `define/public` / `define/private` / `define/override`; Common Lisp adds `deftype`; Clojure adds `definline`.
 - `LineIndex::line_full_range(n)` (a line's byte range *including* its terminator — these ranges tile the source and reconstruct it exactly) and `LineIndex::line_terminator(n) -> Terminator` (`Lf`/`CrLf`/`None`), giving verbatim/round-trip consumers a lossless line view alongside the normalized, content-only `line_range` (ADR-0024).
+- Runnable examples under `examples/` (`dialect_by_extension`, `find_definitions`, `harvest_project_macros`, `lex_tokens`) and a fuller crate-level rustdoc guide with doctests on the main entry points.
 
 ## [0.2.1] - 2026-07-02
 
@@ -91,7 +101,8 @@ Initial release: a pure-Rust, reader-only lexer and parser for S-expression synt
 - `lispexp::annotate`: a definition-form annotator that tags a form's parts (name, arglist, docstring, body) using declared metadata and a spec harvester that reads Emacs Lisp def-macros' own arglist parameter names.
 - Continuous parse-conformance corpus tests over real-world code (chibi-scheme, clojure/clojure, cl-ppcre, lem, magit, typed-racket).
 
-[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rigortype/lispexp/releases/tag/v0.3.0
 [0.2.1]: https://github.com/rigortype/lispexp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rigortype/lispexp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/rigortype/lispexp/releases/tag/v0.1.1
