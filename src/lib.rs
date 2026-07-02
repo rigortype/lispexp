@@ -44,7 +44,7 @@ mod walk;
 pub use datum::{Datum, DatumKind, Delim, Notation, Prefix};
 pub use error::{ErrorKind, ParseError};
 pub use lexer::{lex, Lexer};
-pub use line_index::LineIndex;
+pub use line_index::{LineIndex, Terminator};
 pub use options::{
     BlockComment, CharRoles, CharSyntax, DelimRole, Dialect, HashBracket, HashParen, Options,
     ParseDialectError,

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `LineIndex::line_full_range(n)` (a line's byte range *including* its terminator — these ranges tile the source and reconstruct it exactly) and `LineIndex::line_terminator(n) -> Terminator` (`Lf`/`CrLf`/`None`), giving verbatim/round-trip consumers a lossless line view alongside the normalized, content-only `line_range` (ADR-0024).
+
 ## [0.2.1] - 2026-07-02
 
 A documentation-focused release on top of 0.2.0. It adds named dialects for the `.scm`-using Scheme implementations, clarifies how lispexp models dialect identity (implementations, standard versions, and data formats) and its non-goal of being a validator, and records both decisions as ADRs. All changes are backward-compatible — no breaking changes.

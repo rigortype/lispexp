@@ -9,8 +9,11 @@
 //!   columns are derived by the consumer from [`LineIndex::line_range`] and the
 //!   source (ADR-0017);
 //! - line breaks are **`\n` and `\r\n` only** — a lone `\r` is not a break;
-//! - [`LineIndex::line_range`] returns the line **content only**, excluding the
-//!   terminator.
+//! - [`LineIndex::line_range`] returns line **content only** (terminator
+//!   excluded), so those ranges do **not** tile the source. For verbatim,
+//!   byte-exact work use [`LineIndex::line_full_range`] (content *and*
+//!   terminator — these ranges do tile) and [`LineIndex::line_terminator`]
+//!   (the break kind).
 
 use std::ops::Range;
 
@@ -20,6 +23,19 @@ use std::ops::Range;
 struct Line {
     start: u32,
     end: u32,
+}
+
+/// The line-terminator kind at the end of a line (ADR-0024). Breaks are `\n`
+/// and `\r\n` only, so this is a closed set — matched exhaustively, like
+/// [`crate::Class`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Terminator {
+    /// A single `\n`.
+    Lf,
+    /// A `\r\n` pair.
+    CrLf,
+    /// No terminator — the final line, when the source does not end in a break.
+    None,
 }
 
 /// A precomputed line/column index over a source string (ADR-0024).
@@ -88,12 +104,49 @@ impl LineIndex {
         (line.start + col.saturating_sub(1)).min(line.end)
     }
 
-    /// The byte range of line `n`'s content (1-based, terminator excluded), or
-    /// `None` if `n` is out of range.
+    /// The byte range of line `n`'s **content** (1-based, terminator excluded —
+    /// and for `\r\n` the `\r` is excluded too), or `None` if `n` is out of
+    /// range.
+    ///
+    /// This is the right default for display and content hashing, but it is
+    /// **normalized**: the ranges do *not* tile the source (each line's
+    /// terminator bytes belong to no range), so concatenating `source[range]`
+    /// over all lines does not reconstruct the input. For verbatim,
+    /// byte-exact work use [`Self::line_full_range`] and [`Self::line_terminator`].
     pub fn line_range(&self, n: u32) -> Option<Range<usize>> {
         let idx = (n as usize).checked_sub(1)?;
         let line = self.lines.get(idx)?;
         Some(line.start as usize..line.end as usize)
+    }
+
+    /// The byte range of line `n`'s **full** extent — content *and* its
+    /// terminator (1-based), or `None` if `n` is out of range.
+    ///
+    /// Unlike [`Self::line_range`], these ranges **tile** the source:
+    /// `line_full_range(1)`, `line_full_range(2)`, … are contiguous and cover
+    /// every byte, so concatenating `source[range]` reconstructs the input
+    /// exactly. The last line's range ends at end-of-source (with no terminator
+    /// unless the source ends in a break).
+    pub fn line_full_range(&self, n: u32) -> Option<Range<usize>> {
+        let idx = (n as usize).checked_sub(1)?;
+        let start = self.lines.get(idx)?.start;
+        let end = self.lines.get(idx + 1).map_or(self.len, |next| next.start);
+        Some(start as usize..end as usize)
+    }
+
+    /// The terminator kind ending line `n` (1-based), or `None` if `n` is out
+    /// of range. The final line reports [`Terminator::None`] unless the source
+    /// ends in a break. This is the byte difference between
+    /// [`Self::line_range`] (content) and [`Self::line_full_range`] (verbatim).
+    pub fn line_terminator(&self, n: u32) -> Option<Terminator> {
+        let idx = (n as usize).checked_sub(1)?;
+        let line = *self.lines.get(idx)?;
+        let full_end = self.lines.get(idx + 1).map_or(self.len, |next| next.start);
+        Some(match full_end - line.end {
+            0 => Terminator::None,
+            1 => Terminator::Lf,
+            _ => Terminator::CrLf,
+        })
     }
 }
 
@@ -191,5 +244,59 @@ mod tests {
         let idx = LineIndex::new("ab\r\ncd");
         let off = idx.line_col_to_offset(1, 10);
         assert_eq!(off, 2); // just past "ab", before the "\r\n"
+    }
+
+    #[test]
+    fn full_ranges_tile_the_source() {
+        // Concatenating full ranges over every line reconstructs the input
+        // exactly — content ranges do not (they drop terminators).
+        for src in [
+            "ab\r\ncd",
+            "one\ntwo\r\nthree",
+            "x\n",
+            "",
+            "no newline",
+            "\n\n",
+        ] {
+            let idx = LineIndex::new(src);
+            let mut rebuilt = String::new();
+            let mut prev_end = 0;
+            for n in 1..=idx.line_count() as u32 {
+                let r = idx.line_full_range(n).unwrap();
+                assert_eq!(
+                    r.start, prev_end,
+                    "full ranges must be contiguous in {src:?}"
+                );
+                rebuilt.push_str(&src[r.clone()]);
+                prev_end = r.end;
+            }
+            assert_eq!(
+                prev_end,
+                src.len(),
+                "full ranges must cover to EOF in {src:?}"
+            );
+            assert_eq!(rebuilt, src, "full ranges must reconstruct {src:?}");
+        }
+    }
+
+    #[test]
+    fn line_terminator_kinds() {
+        let idx = LineIndex::new("ab\r\ncd\ne");
+        assert_eq!(idx.line_terminator(1), Some(Terminator::CrLf)); // "ab\r\n"
+        assert_eq!(idx.line_terminator(2), Some(Terminator::Lf)); // "cd\n"
+        assert_eq!(idx.line_terminator(3), Some(Terminator::None)); // "e", no break
+        assert_eq!(idx.line_terminator(4), None); // out of range
+
+        // A trailing newline gives the final content line a real terminator.
+        let idx = LineIndex::new("x\n");
+        assert_eq!(idx.line_terminator(1), Some(Terminator::Lf));
+    }
+
+    #[test]
+    fn full_range_includes_terminator_content_excludes_it() {
+        let idx = LineIndex::new("ab\r\ncd");
+        assert_eq!(idx.line_range(1), Some(0..2)); // "ab"
+        assert_eq!(idx.line_full_range(1), Some(0..4)); // "ab\r\n"
+        assert_eq!(idx.line_full_range(3), None); // out of range
     }
 }

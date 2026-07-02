@@ -24,6 +24,18 @@ Conventions, chosen to match the existing 1-based Datum line and Rust's
 - **`line_range(n)` excludes the terminator** (line content only); an offset on
   the newline maps to the column just past the last content byte.
 
+> **Amended 2026-07-02.** lisplens (a verbatim/round-trip consumer) flagged that
+> a uniformly byte-oriented API whose natural "line N" accessor silently returns
+> *normalized* content is a footgun: `line_range`'s ranges do not tile the source
+> (terminator bytes belong to no range) and give no way to recover a line's
+> verbatim bytes or its terminator kind. `line_range` stays as the content/hash
+> default, and two additive, non-breaking accessors make the verbatim path
+> discoverable: **`line_full_range(n)`** (content *and* terminator — these ranges
+> tile the source and reconstruct it exactly) and **`line_terminator(n) ->
+> Terminator { Lf, CrLf, None }`** (the break kind). `Terminator` is a closed
+> set, matched exhaustively like `Class` (ADR-0026), since the `\n`/`\r\n`-only
+> line policy above is fixed.
+
 ## Considered options
 
 - **Char (Unicode scalar) columns.** Rejected: closer to human display but still
