@@ -6,7 +6,7 @@ lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or
 
 ## Features
 
-- **One reader, many dialects.** [Scheme][] ([R<sup>7</sup>RS-small][R7RS]), [Guile], [Racket], [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], [Janet], and [EDN] — plus a tolerant `.scm` "Scheme superset" — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
+- **One reader, many dialects.** [Scheme][] ([R<sup>7</sup>RS-small][R7RS], [Guile], [Racket], [Gauche]), [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], [Janet], and [EDN] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
 - **Position-annotated.** Every datum carries a byte span and 1-based start line; a `LineIndex` maps offsets to 1-based (line, byte-column).
 - **Code vs. data aware.** Quote/quasiquote/unquote structure is preserved, and a pruning `walk` classifies each node as `Code` or `Data` so consumers descend into code and skip quoted data.
 - **Fault-tolerant.** Malformed input never panics; the reader returns a partial tree plus structured diagnostics, resynchronizing at the next top-level form, with a bounded recursion depth.
@@ -36,6 +36,16 @@ Pick a dialect with a preset (`Options::clojure()`, `Options::emacs_lisp()`, `Op
 
 Beyond the core reader, the crate exposes: `lex` / `Lexer` (the token layer), `walk` (a code-vs-data pruning visitor), `parse_form_at` (positioned single-form reparse for incremental validation), `LineIndex` (offset ↔ line/column), and the `annotate` and `indent` utility modules.
 
+### Scheme support
+
+Scheme is a family — R7RS-small plus implementations that extend its reader — and lispexp reads it through a preset per variant:
+
+- **`Options::scheme()` — exact R7RS-small.** A strict conformance reader: the [chibi-scheme] reference implementation parses with zero errors, and a stray `#/…/` or `#[…]` in genuinely R7RS code is still reported.
+- **`Options::guile()` and `Options::racket()`** layer each implementation's distinctive surface on that base — `#:foo` keywords and `#'` syntax quoting, plus Racket's `#lang` line, `[]`/`{}`-as-lists, and infix dot, and Guile's `#{…}#` extended symbols. They earn dedicated presets because that syntax can reshape the tree, so it is not safe to enable unconditionally.
+- **`Options::scheme_superset()` (`Dialect::SchemeSuperset`) — the tolerant `.scm` reader.** The `.scm` extension is shared by [Gauche], Mosh (R6RS), and Gambit, whose reader extensions are *non-conflicting* widenings of R7RS. Because none of them reshapes valid R7RS, a single preset unions them all: `#[…]` char-sets and `#/…/` regexps (opaque `Str` leaves), `#"…"` interpolated strings, `#vu8(…)` bytevectors, and both leading-colon `:foo` and trailing-colon `foo:` keywords. This is why Gauche, unlike Guile and Racket, needs no bespoke preset — its surface already lives in the shared superset. On a full Gauche checkout the superset cuts parse errors from 288 (across 40 files) to 3 (one file, a `(exit 0)`-then-trailing-data idiom no full-file reader can model). See [ADR-0027](docs/adr/0027-scheme-superset-tolerant-reader.md).
+
+lispexp never infers a dialect across files or models the numeric tower: pick a preset per input (e.g. by file extension) and read.
+
 ## Documentation
 
 API docs are on [docs.rs](https://docs.rs/lispexp). The design is recorded in [`docs/design.md`](docs/design.md), the domain vocabulary in [`CONTEXT.md`](CONTEXT.md), and the decisions behind it in the ADRs under [`docs/adr/`](docs/adr/).
@@ -60,6 +70,8 @@ limitations under the License.
 
 [Scheme]: https://www.scheme.org/
 [R7RS]: https://r7rs.org/
+[chibi-scheme]: https://github.com/ashinn/chibi-scheme
+[Gauche]: https://practical-scheme.net/gauche/
 [Guile]: https://www.gnu.org/software/guile/
 [Racket]: https://racket-lang.org/
 [Common Lisp]: https://common-lisp.net/
