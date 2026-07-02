@@ -1,17 +1,11 @@
 # Scheme dialect triage: Gauche's reader extensions
 
-> **Update (resolved in `lispexp`).** This gap is now fixed *in the reader
-> itself*: `lispexp` ships an `Options::scheme_superset()` preset
-> (`Dialect::SchemeSuperset`, ADR-0027) that tolerates the `.scm`-shared reader
-> extensions of Gauche, Mosh, and Gambit — `#[…]` char-sets and `#/…/` regexps
-> as opaque `Str` leaves, plus `#"…"` interpolated strings, `#vu8(…)`
-> bytevectors, and trailing-colon `foo:` keywords. A consumer analyzing `.scm`
-> files should select `scheme_superset()` instead of `scheme()`; the per-file
-> desugar shim sketched under "Result" below is no longer needed downstream.
-> Re-running the same Gauche checkout under the new preset reproduces the
-> 288-errors-in-40-files → 3-errors-in-1-file result natively (the residual is
-> the `src/srfis.scm` "data after `(exit 0)`" idiom described at the end). The
-> analysis below is kept as the original reasoning record.
+> **Status: resolved (historical record).** The gap diagnosed here is fixed in
+> the reader itself: `lispexp` 0.2.0 ships `Options::scheme_superset()`
+> (`Dialect::SchemeSuperset`, ADR-0027), which `cccc-scheme` now uses instead of
+> its own shim. The analysis below is kept as the original reasoning record; the
+> resolution and its measured result are in the *Superseded by `lispexp` 0.2.0*
+> section at the end.
 
 `cccc-scheme` targets **R7RS-small** (see the crate's module doc). This note
 records what happens when it meets real-world Scheme code that goes beyond
@@ -162,3 +156,52 @@ in the same file (`parse`, `record-generator`, `generate`, …) are still
 correctly detected — the 3 errors are fully confined to the trailing data
 block, confirming the shim's "resync at the next top-level form" property
 holds even for this unrelated failure mode.
+
+## Superseded by `lispexp` 0.2.0's `Options::scheme_superset()`
+
+`lispexp` 0.2.0 (2026-07-02) shipped exactly this fix at the reader level —
+`Options::scheme_superset()` / `Dialect::SchemeSuperset` (ADR-0027 in the
+`lispexp` repository), a tolerant `.scm` preset covering `#[...]`/`#/regexp/`
+plus more of the shared Gauche/Mosh/Gambit surface (`#"..."` interpolated
+strings, `#vu8(...)` bytevectors, both leading- and trailing-colon keywords).
+`cccc-scheme` now depends on `lispexp` 0.2 and reads every `.scm`/`.ss`/`.sld`
+file with `Options::scheme_superset()`; the hand-rolled
+`desugar_gauche_extensions` shim described above was deleted, along with the
+tests that exercised its internal scanning logic (POSIX-class nesting inside
+`#[...]`, unterminated-literal fallback, …) — that lexical correctness is now
+`lispexp`'s concern and covered by its own test suite. `cccc-scheme` keeps
+only the handful of tests that confirm *its own* integration: that `to_ir`
+actually requests the superset and correctly lowers what it returns.
+
+Re-running the same Gauche checkout against the new reader reproduces the
+numbers above **exactly** — 12,486 functions, 3 errors in 1 file — confirming
+the two approaches are behaviorally equivalent for this corpus, as expected
+from ADR-0027 citing the same audit.
+
+### A negligible, expected side effect on chibi-scheme
+
+Re-running the chibi-scheme corpus (the audit's other anchor) shows 7,672
+functions instead of 7,676 — 4 fewer, all in `lib/chibi/syntax-case.scm`, all
+`cognitive = 0`. This is **not a regression to work around**: `lispexp` 0.1.1
+had a lexer bug where chibi's own `` #` ``/`#,`/`#,@` reader macros (a
+syntax-case hygienic-template notation, unrelated to Gauche) weren't
+recognized at all and were mis-tokenized in a way that accidentally "leaked" a
+nested `lambda` as a sibling list element. `lispexp` 0.2.0 now correctly reads
+these as `DatumKind::HashLiteral`, and — per `lispexp`'s own ADR-0026 (the
+code-vs-data walker, landed the same release) — a `HashLiteral`'s contents are
+classified as `Data` unconditionally, since a generic `#tag(...)` payload could
+mean anything (from `#u8(...)` bytevector data to a macro-authoring
+convention like this one) and `lispexp` deliberately doesn't guess per tag.
+`cccc-scheme`'s own `lower_datum` follows the same stance (it only descends
+into `List` and `Prefixed`, never `HashLiteral`), so those four
+`lambda`s — a chibi-internal macro-implementation detail, not R7RS-small user
+code — are no longer counted. The effect is confined to raw function *count*;
+no reported cognitive/cyclomatic score anywhere in the corpus changed.
+
+A cleaner long-term fix, not done here: `cccc-scheme`'s `lower_prefixed`/
+`lower_quasi` hand-roll the same quote/quasiquote/unquote code-vs-data ruling
+that `lispexp::walk` (ADR-0026) now provides as a first-class, officially
+-maintained API. Migrating to `walk`/`Class` would let `cccc-scheme` track
+`lispexp`'s own considered semantics (including cases like this one) instead
+of maintaining a parallel, potentially-diverging judgment — worth a follow-up,
+but a larger change than adopting 0.2.0 itself.
