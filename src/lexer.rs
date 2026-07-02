@@ -192,39 +192,39 @@ impl<'a, 'o> Lexer<'a, 'o> {
 
     fn try_prefix(&mut self) -> Option<TokenKind> {
         let c = self.peek()?;
-        if Some(c) == self.opts.quote {
+        if Some(c) == self.opts.roles.quote {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Quote));
         }
-        if Some(c) == self.opts.quasiquote {
+        if Some(c) == self.opts.roles.quasiquote {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Quasiquote));
         }
-        if Some(c) == self.opts.unquote {
+        if Some(c) == self.opts.roles.unquote {
             self.bump();
-            if self.peek() == Some(self.opts.splicing_suffix) {
+            if self.peek() == Some(self.opts.roles.splicing_suffix) {
                 self.bump();
                 return Some(TokenKind::Prefix(Prefix::UnquoteSplicing));
             }
             return Some(TokenKind::Prefix(Prefix::Unquote));
         }
-        if Some(c) == self.opts.deref {
+        if Some(c) == self.opts.roles.deref {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Deref));
         }
-        if Some(c) == self.opts.meta {
+        if Some(c) == self.opts.roles.meta {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Meta));
         }
-        if Some(c) == self.opts.splice {
+        if Some(c) == self.opts.roles.splice {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Splice));
         }
-        if Some(c) == self.opts.mutable {
+        if Some(c) == self.opts.roles.mutable {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::Mutable));
         }
-        if Some(c) == self.opts.short_fn {
+        if Some(c) == self.opts.roles.short_fn {
             self.bump();
             return Some(TokenKind::Prefix(Prefix::HashFn));
         }
@@ -451,7 +451,7 @@ impl<'a, 'o> Lexer<'a, 'o> {
                     start,
                 )
             }
-            Some('^') if self.opts.meta.is_some() => {
+            Some('^') if self.opts.roles.meta.is_some() => {
                 self.bump();
                 self.token(TokenKind::Prefix(Prefix::Meta), start)
             }

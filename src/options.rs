@@ -82,6 +82,70 @@ pub enum HashBracket {
     None,
 }
 
+/// The per-dialect table of reader-macro prefix glyphs (ADR-0016).
+///
+/// Grouped separately from [`Options`] because these fields are exactly the
+/// glyph-to-role assignments a dialect makes for its prefix syntax — a
+/// cohesive table, not a grab-bag of independent toggles. Build from a base
+/// preset such as [`CharRoles::scheme`] or [`CharRoles::clojure`] and override
+/// individual glyphs (`CharRoles { unquote: Some('~'), ..CharRoles::scheme()
+/// }`).
+///
+/// `#[non_exhaustive]`: adding a new prefix role's glyph field is not a
+/// breaking change.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct CharRoles {
+    /// Glyph for `quote` shorthand, if any.
+    pub quote: Option<char>,
+    /// Glyph for `quasiquote` shorthand, if any.
+    pub quasiquote: Option<char>,
+    /// Glyph for `unquote` shorthand, if any.
+    pub unquote: Option<char>,
+    /// Suffix that turns `unquote` into `unquote-splicing` (e.g. `,` + `@`).
+    pub splicing_suffix: char,
+    /// Glyph for a deref prefix (Clojure `@`), if any.
+    pub deref: Option<char>,
+    /// Glyph for a metadata prefix (Clojure `^`), if any.
+    pub meta: Option<char>,
+    /// Glyph for a splice prefix (Janet `;`), if any.
+    pub splice: Option<char>,
+    /// Glyph for a mutable-marker prefix (Janet `@`), if any.
+    pub mutable: Option<char>,
+    /// Glyph for a bare short-function prefix (Janet `|`), if any.
+    pub short_fn: Option<char>,
+}
+
+impl CharRoles {
+    /// The Scheme/Lisp-family base table: `'` quote, `` ` `` quasiquote, `,`
+    /// unquote with `@` as the splicing suffix, and no deref/meta/splice/
+    /// mutable/short-fn glyphs.
+    pub fn scheme() -> Self {
+        CharRoles {
+            quote: Some('\''),
+            quasiquote: Some('`'),
+            unquote: Some(','),
+            splicing_suffix: '@',
+            deref: None,
+            meta: None,
+            splice: None,
+            mutable: None,
+            short_fn: None,
+        }
+    }
+
+    /// The Clojure-family base table: [`Self::scheme`]'s quote family, `~` for
+    /// unquote, `@` deref, and `^` meta.
+    pub fn clojure() -> Self {
+        CharRoles {
+            unquote: Some('~'),
+            deref: Some('@'),
+            meta: Some('^'),
+            ..CharRoles::scheme()
+        }
+    }
+}
+
 /// A named dialect. Presets are constructed via [`Options`].
 ///
 /// `#[non_exhaustive]`: new dialects are added over time, so downstream `match`es
@@ -190,24 +254,8 @@ pub struct Options {
     /// Whether a lone `.` inside a list marks a dotted/improper tail `(a . b)`.
     /// False for Clojure, where `.` is an ordinary interop symbol.
     pub dotted_pairs: bool,
-    /// Glyph for `quote` shorthand, if any.
-    pub quote: Option<char>,
-    /// Glyph for `quasiquote` shorthand, if any.
-    pub quasiquote: Option<char>,
-    /// Glyph for `unquote` shorthand, if any.
-    pub unquote: Option<char>,
-    /// Suffix that turns `unquote` into `unquote-splicing` (e.g. `,` + `@`).
-    pub splicing_suffix: char,
-    /// Glyph for a deref prefix (Clojure `@`), if any.
-    pub deref: Option<char>,
-    /// Glyph for a metadata prefix (Clojure `^`), if any.
-    pub meta: Option<char>,
-    /// Glyph for a splice prefix (Janet `;`), if any.
-    pub splice: Option<char>,
-    /// Glyph for a mutable-marker prefix (Janet `@`), if any.
-    pub mutable: Option<char>,
-    /// Glyph for a bare short-function prefix (Janet `|`), if any.
-    pub short_fn: Option<char>,
+    /// The dialect's reader-macro prefix glyph table (ADR-0016).
+    pub roles: CharRoles,
     /// Whether a run of backticks delimits a long string (Janet).
     pub long_string_backtick: bool,
     /// What `#[` opens: a Gauche char-set, a Hy bracket string, or nothing
@@ -287,15 +335,7 @@ impl Options {
             hash_keyword: false,
             lang_line: false,
             shebang_line: false,
-            quote: Some('\''),
-            quasiquote: Some('`'),
-            unquote: Some(','),
-            splicing_suffix: '@',
-            deref: None,
-            meta: None,
-            splice: None,
-            mutable: None,
-            short_fn: None,
+            roles: CharRoles::scheme(),
             long_string_backtick: false,
             hash_bracket: HashBracket::None,
             regex_slash: false,
@@ -337,15 +377,7 @@ impl Options {
             hash_keyword: false,
             lang_line: false,
             shebang_line: false,
-            quote: Some('\''),
-            quasiquote: Some('`'),
-            unquote: Some('~'),
-            splicing_suffix: '@',
-            deref: Some('@'),
-            meta: Some('^'),
-            splice: None,
-            mutable: None,
-            short_fn: None,
+            roles: CharRoles::clojure(),
             long_string_backtick: false,
             hash_bracket: HashBracket::None,
             regex_slash: false,
@@ -394,15 +426,7 @@ impl Options {
             hash_keyword: false,
             lang_line: false,
             shebang_line: false,
-            quote: Some('\''),
-            quasiquote: Some('`'),
-            unquote: Some(','),
-            splicing_suffix: '@',
-            deref: None,
-            meta: None,
-            splice: None,
-            mutable: None,
-            short_fn: None,
+            roles: CharRoles::scheme(),
             long_string_backtick: false,
             hash_bracket: HashBracket::None,
             regex_slash: false,
@@ -445,15 +469,7 @@ impl Options {
             hash_keyword: false,
             lang_line: false,
             shebang_line: false,
-            quote: Some('\''),
-            quasiquote: Some('`'),
-            unquote: Some(','),
-            splicing_suffix: '@',
-            deref: None,
-            meta: None,
-            splice: None,
-            mutable: None,
-            short_fn: None,
+            roles: CharRoles::scheme(),
             long_string_backtick: false,
             hash_bracket: HashBracket::None,
             regex_slash: false,
@@ -500,11 +516,14 @@ impl Options {
             piped_symbols: false,
             datum_labels: false,
             dotted_pairs: false,
-            quasiquote: Some('~'),
-            unquote: Some(','),
-            splice: Some(';'),
-            mutable: Some('@'), // `@[]` array, `@{}` table, `@"..."` buffer
-            short_fn: Some('|'),
+            roles: CharRoles {
+                quasiquote: Some('~'),
+                unquote: Some(','),
+                splice: Some(';'),
+                mutable: Some('@'), // `@[]` array, `@{}` table, `@"..."` buffer
+                short_fn: Some('|'),
+                ..CharRoles::scheme()
+            },
             long_string_backtick: true, // `` `...` ``
             fold_longhand: false,       // Janet quote is `quote`/`quasiquote` fns, not folded
             ..Options::scheme()
@@ -527,8 +546,11 @@ impl Options {
             keyword_colon: true,
             piped_symbols: false,
             datum_labels: false,
-            dotted_pairs: false,                      // `.` is attribute access
-            unquote: Some('~'),                       // Clojure-style unquote
+            dotted_pairs: false, // `.` is attribute access
+            roles: CharRoles {
+                unquote: Some('~'), // Clojure-style unquote
+                ..CharRoles::scheme()
+            },
             hash_bracket: HashBracket::BracketString, // #[[...]] / #[DELIM[...]DELIM]
             fold_longhand: false,                     // Hy longhand differs; `'` is reader syntax
             ..Options::scheme()
@@ -552,8 +574,11 @@ impl Options {
             hash_paren: HashParen::None,
             piped_symbols: false,
             datum_labels: false,
-            quasiquote: None, // no backquote/unquote in AutoLISP
-            unquote: None,
+            roles: CharRoles {
+                quasiquote: None, // no backquote/unquote in AutoLISP
+                unquote: None,
+                ..CharRoles::scheme()
+            },
             fold_case_insensitive: true, // AutoLISP's reader is case-insensitive
             ..Options::scheme()
         }
@@ -591,11 +616,14 @@ impl Options {
             hash_apostrophe: None,       // no `#'` var-quote
             reader_conditional: false,   // no `#?`/`#?@`
             regex_literal: false,        // no `#"…"` regex
-            deref: None,                 // no `@` deref
-            quote: None,                 // no `'x` quote
-            quasiquote: None,            // no `` `x `` syntax-quote
-            unquote: None,               // no `~x` / `~@x`
-            meta: None,                  // no `^meta`
+            roles: CharRoles {
+                deref: None,      // no `@` deref
+                quote: None,      // no `'x` quote
+                quasiquote: None, // no `` `x `` syntax-quote
+                unquote: None,    // no `~x` / `~@x`
+                meta: None,       // no `^meta`
+                ..CharRoles::clojure()
+            },
             ..Options::clojure()
         }
     }

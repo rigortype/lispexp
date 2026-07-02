@@ -38,11 +38,6 @@ pub fn parse<'a>(source: &'a str, options: &Options) -> Parsed<'a> {
     }
 }
 
-/// Convenience: iterate top-level data, discarding diagnostics.
-pub fn read_all<'a>(source: &'a str, options: &Options) -> std::vec::IntoIter<Datum<'a>> {
-    parse(source, options).data.into_iter()
-}
-
 /// One top-level form read at or after a byte offset (ADR-0023).
 ///
 /// The result of [`parse_form_at`]. Spans are absolute into the original
@@ -575,7 +570,7 @@ impl<'a, 'o> Parser<'a, 'o> {
 /// Fold `(quote x)` and friends into a longhand [`DatumKind::Prefixed`]
 /// (ADR-0002). Only the exact two-element round-list shape qualifies, and only
 /// when the head names a quote-family form whose shorthand glyph the dialect
-/// actually has (`quote` iff `options.quote.is_some()`, etc.). Case-insensitive
+/// actually has (`quote` iff `options.roles.quote.is_some()`, etc.). Case-insensitive
 /// dialects (`options.fold_case_insensitive`) match `(QUOTE X)` too.
 fn fold_longhand<'a>(datum: Datum<'a>, opts: &Options) -> Datum<'a> {
     match datum.kind {
@@ -629,13 +624,13 @@ fn quote_symbol(s: &str, opts: &Options) -> Option<Prefix> {
             s == name
         }
     };
-    if opts.quote.is_some() && eq("quote") {
+    if opts.roles.quote.is_some() && eq("quote") {
         return Some(Prefix::Quote);
     }
-    if opts.quasiquote.is_some() && eq("quasiquote") {
+    if opts.roles.quasiquote.is_some() && eq("quasiquote") {
         return Some(Prefix::Quasiquote);
     }
-    if opts.unquote.is_some() {
+    if opts.roles.unquote.is_some() {
         if eq("unquote") {
             return Some(Prefix::Unquote);
         }
