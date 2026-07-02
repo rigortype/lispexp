@@ -53,8 +53,11 @@
 //!   is transparent too. A `Prefixed`'s auxiliary `arg` (metadata form /
 //!   feature test) is visited as `Data`.
 //!
-//! The visitor is primary because pruning cannot be expressed by a bare
-//! iterator. A pre-order iterator adapter may be layered on later.
+//! The visitor is primary because *arbitrary* per-node pruning cannot be
+//! expressed by a bare iterator. [`code_nodes`] layers the one common fixed
+//! policy — prune sealed data, descend porous templates, yield only code — on
+//! top as a pre-order [`Iterator`], for consumers that just want "every code
+//! node" and the combinators (`filter`/`find`/`take`) that come with it.
 
 use std::ops::ControlFlow;
 
@@ -281,37 +284,104 @@ where
         Walk::Stop => return ControlFlow::Break(()),
         Walk::Descend => {}
     }
+    for (child, cctx) in children(datum, ctx) {
+        walk_datum(child, cctx, visit)?;
+    }
+    ControlFlow::Continue(())
+}
+
+/// The structural children of `datum`, each paired with the region context it
+/// inherits, in source order. The single place that knows a datum's child shape
+/// and how each prefix shifts the region — both the [`walk_regions`] visitor and
+/// the [`code_nodes`] iterator route their descent through it.
+fn children<'a, 't>(datum: &'a Datum<'t>, ctx: Ctx) -> impl Iterator<Item = (&'a Datum<'t>, Ctx)> {
+    // At most two direct child slots (a list's items+tail, or a prefix's
+    // arg+inner); collect into a small fixed buffer to keep one return type.
+    let mut out: Vec<(&'a Datum<'t>, Ctx)> = Vec::new();
     match &datum.kind {
         DatumKind::List { items, tail, .. } => {
-            for item in items {
-                walk_datum(item, ctx, visit)?;
-            }
+            out.extend(items.iter().map(|item| (item, ctx)));
             if let Some(tail) = tail {
-                walk_datum(tail, ctx, visit)?;
+                out.push((tail, ctx));
             }
         }
         DatumKind::Prefixed {
             prefix, inner, arg, ..
         } => {
             // The auxiliary datum (metadata form / feature test) is inert
-            // metadata: visit it as data before the inner form.
+            // metadata: visited as data before the inner form.
             if let Some(arg) = arg {
-                walk_datum(arg, Ctx::DATA, visit)?;
+                out.push((arg, Ctx::DATA));
             }
-            walk_datum(inner, inner_ctx(*prefix, ctx), visit)?;
+            out.push((inner, inner_ctx(*prefix, ctx)));
         }
         // A hash literal's content is data; a datum label is transparent.
         DatumKind::HashLiteral {
             inner: Some(inner), ..
-        } => {
-            walk_datum(inner, Ctx::DATA, visit)?;
-        }
-        DatumKind::Label { inner, .. } => {
-            walk_datum(inner, ctx, visit)?;
-        }
+        } => out.push((inner, Ctx::DATA)),
+        DatumKind::Label { inner, .. } => out.push((inner, ctx)),
         _ => {}
     }
-    ControlFlow::Continue(())
+    out.into_iter()
+}
+
+/// A pre-order iterator over the [`Class::Code`] nodes of a datum forest,
+/// created by [`code_nodes`].
+///
+/// Unlike the [`walk`]/[`walk_regions`] visitors — which let a consumer make an
+/// arbitrary prune decision per node — this fixes the common policy: prune
+/// [`Region::SealedData`], descend [`Region::PorousData`] (so nested unquoted
+/// code is reached), and yield each code node once, parent before child. A
+/// caller that just wants "every code node" writes a `for` loop instead of a
+/// callback, and gets `Iterator`'s combinators (`filter`, `find`, `take`, …)
+/// with short-circuiting for free.
+pub struct CodeNodes<'a, 't> {
+    // A DFS worklist of (datum, region context). Children are pushed reversed so
+    // the leftmost is popped next, giving pre-order over the code nodes.
+    stack: Vec<(&'a Datum<'t>, Ctx)>,
+}
+
+impl<'a, 't> Iterator for CodeNodes<'a, 't> {
+    type Item = &'a Datum<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((datum, ctx)) = self.stack.pop() {
+            // Sealed data can never contain code — prune it, don't descend.
+            let region = node_region(datum, ctx);
+            if region == Region::SealedData {
+                continue;
+            }
+            let start = self.stack.len();
+            self.stack.extend(children(datum, ctx));
+            self.stack[start..].reverse();
+            // Code nodes are yielded; porous templates are only descended.
+            if region == Region::Code {
+                return Some(datum);
+            }
+        }
+        None
+    }
+}
+
+/// Iterate the [`Class::Code`] nodes of `data` in pre-order — the read-only,
+/// fixed-policy counterpart to [`walk`]. It always prunes sealed data and
+/// descends porous quasiquote templates, so nested unquoted code is reached but
+/// quoted data is never yielded.
+///
+/// ```
+/// use lispexp::{parse, code_nodes, DatumKind, Options};
+///
+/// // Only the unquoted `(f y)` is code; the quoted `(b c)` is pruned.
+/// let parsed = parse("`(a ,(f y) '(b c))", &Options::scheme());
+/// let code_lists = code_nodes(&parsed.data)
+///     .filter(|d| matches!(d.kind, DatumKind::List { .. }))
+///     .count();
+/// assert_eq!(code_lists, 1);
+/// ```
+pub fn code_nodes<'a, 't>(data: &'a [Datum<'t>]) -> CodeNodes<'a, 't> {
+    CodeNodes {
+        stack: data.iter().rev().map(|d| (d, Ctx::TOP)).collect(),
+    }
 }
 
 #[cfg(test)]
@@ -530,6 +600,69 @@ mod tests {
         assert!(visited.contains(&"(b c)"));
         assert!(!visited.contains(&"b"));
         assert!(!visited.contains(&"c"));
+    }
+
+    /// Every code node `code_nodes` yields, by source text, in order.
+    fn code_texts<'a>(src: &'a str, opts: &Options) -> Vec<&'a str> {
+        let parsed = parse(src, opts);
+        code_nodes(&parsed.data).map(|d| d.span.text(src)).collect()
+    }
+
+    #[test]
+    fn code_nodes_yields_code_preorder_and_prunes_sealed() {
+        let s = Options::scheme();
+        // The quote *form* `'(a b)` is code (it evaluates to data); its contents
+        // are sealed and pruned. Pre-order: list, head, the quote form, tail.
+        assert_eq!(
+            code_texts("(f '(a b) x)", &s),
+            vec!["(f '(a b) x)", "f", "'(a b)", "x"],
+        );
+    }
+
+    #[test]
+    fn code_nodes_descends_porous_to_reach_unquoted_code() {
+        let s = Options::scheme();
+        let got = code_texts("`(a ,(f y))", &s);
+        // The unquoted call and its parts are reached...
+        assert!(got.contains(&"(f y)"));
+        assert!(got.contains(&"y"));
+        // ...but template data at depth 1 (`a`) is not code, so not yielded.
+        assert!(!got.contains(&"a"));
+    }
+
+    #[test]
+    fn code_nodes_is_lazy_and_short_circuits() {
+        let s = Options::scheme();
+        let parsed = parse("(a (b (c (d e))))", &s);
+        // `find` stops as soon as it hits `b`; the rest is never walked.
+        let first_b = code_nodes(&parsed.data).find(|d| d.span.text("(a (b (c (d e))))") == "b");
+        assert!(first_b.is_some());
+    }
+
+    #[test]
+    fn code_nodes_matches_walk_regions_code_classification() {
+        // The iterator's fixed prune/descend policy must agree, node-for-node
+        // and in order, with descending everything and keeping the code nodes.
+        let s = Options::scheme();
+        for src in [
+            "(f x)",
+            "`(a ,(f y) '(b c))",
+            "(a '(b c) d)",
+            "``(,,c)",
+            "'(a ,b)",
+            "(let ((x 1)) `(v ,x))",
+        ] {
+            let parsed = parse(src, &s);
+            let via_iter: Vec<&str> = code_nodes(&parsed.data).map(|d| d.span.text(src)).collect();
+            let mut via_visitor = Vec::new();
+            walk_regions(&parsed.data, |d, r| {
+                if r == Region::Code {
+                    via_visitor.push(d.span.text(src));
+                }
+                Walk::Descend
+            });
+            assert_eq!(via_iter, via_visitor, "mismatch for {src:?}");
+        }
     }
 
     #[test]
