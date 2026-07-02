@@ -6,16 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-02
+
+A documentation-focused release on top of 0.2.0. It adds named dialects for the `.scm`-using Scheme implementations, clarifies how lispexp models dialect identity (implementations, standard versions, and data formats) and its non-goal of being a validator, and records both decisions as ADRs. All changes are backward-compatible — no breaking changes.
+
 ### Added
 
-- `Dialect::Gauche`, `Dialect::Mosh`, and `Dialect::Gambit`: named entry points for the `.scm`-using Scheme implementations, each resolving to the shared `Options::scheme_superset()` reader (ADR-0027) so `Dialect::from_str("gauche")` / `Dialect::ALL` cover them.
+- `Dialect::Gauche`, `Dialect::Mosh`, and `Dialect::Gambit`: named entry points for the `.scm`-using Scheme implementations, each resolving to the shared `Options::scheme_superset()` reader so `Dialect::from_str("gauche")` and `Dialect::ALL` now cover them (ADR-0027, ADR-0029).
 
 ### Changed
 
-- Every `Dialect` variant now carries an explanatory doc comment (what the dialect is, and its Scheme/Clojure lineage where relevant) and the variants are grouped by family; `Dialect::Guile` in particular is documented as GNU Guile, the official extension language of the GNU Project, rather than the terse "Guile Scheme".
-- `Dialect::Scheme` / `Options::scheme()` now document that the Scheme reader tracks the latest small Scheme standard (currently R7RS-small) and reads earlier RnRS as a subset, rather than pinning a version.
-- `Options::emacs_lisp()` is documented as also reading the Emacs Lisp Data format (`lisp-data-mode`, `.eld`); Emacs uses one reader for code and data, so no restricted data-only preset is needed (contrast `Options::edn()`).
-- A README "Non-goals" section and ADR-0030 state that lispexp is a faithful reader, not a validator: it reports structural diagnostics (delimiter balance, dangling prefixes, malformed tokens) via `Parsed::errors`, but accepts a per-implementation superset and does not perform dialect-semantic/conformance validation. The README also documents lispexp's positioning as a syntactic substrate for higher-level static tools (linters/indexers/formatters), including the trivia-via-`lex` seam.
+- Every `Dialect` variant now carries an explanatory doc comment and the variants are grouped by family, so a reader unfamiliar with a given Lisp can tell what it is and its lineage — `Dialect::Guile`, for one, is now documented as GNU Guile, the official extension language of the GNU Project, rather than the terse "Guile Scheme".
+- `Dialect::Scheme` and `Options::scheme()` now document that they track the latest *small* Scheme standard (currently R7RS-small) and read earlier RnRS as a subset, rather than pinning a version (ADR-0029).
+- `Options::emacs_lisp()` now documents that it also reads the Emacs Lisp Data format (`lisp-data-mode`, `.eld`) — Emacs uses one reader for code and data, so no restricted data-only preset is needed, unlike `Options::edn()`.
+- A new README "Non-goals" section and ADR-0030 record that lispexp is a faithful reader, not a validator: it reports structural diagnostics via `Parsed::errors` but accepts a per-implementation superset and does no dialect-semantic validation, positioning it as a syntactic substrate that higher-level static tools (linters, indexers, formatters) build a semantic layer on.
 
 ## [0.2.0] - 2026-07-02
 
@@ -83,7 +87,8 @@ Initial release: a pure-Rust, reader-only lexer and parser for S-expression synt
 - `lispexp::annotate`: a definition-form annotator that tags a form's parts (name, arglist, docstring, body) using declared metadata and a spec harvester that reads Emacs Lisp def-macros' own arglist parameter names.
 - Continuous parse-conformance corpus tests over real-world code (chibi-scheme, clojure/clojure, cl-ppcre, lem, magit, typed-racket).
 
-[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/rigortype/lispexp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/rigortype/lispexp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/rigortype/lispexp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/rigortype/lispexp/releases/tag/v0.1.0
