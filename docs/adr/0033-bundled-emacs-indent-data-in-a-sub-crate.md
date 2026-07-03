@@ -51,9 +51,32 @@ concerns cohere — all make a tool match Emacs's view of Lisp, all are
 Emacs-version-sensitive, all depend only on `lispexp` — so one crate (modules,
 optionally feature-gated) beats both a single-table crate (too narrow; the next
 Emacs concern needs a new crate) and per-concern crates (proliferation,
-versioning/discoverability overhead). Planned modules: `indent` (this change),
-a major-mode registry, and a `.dir-locals.el` interpreter — the last reads an
-elisp data file `lispexp` already parses, so it is natural here.
+versioning/discoverability overhead).
+
+**Why Emacs is the foundation, not an arbitrary choice.** Lisp tooling is
+historically inseparable from Emacs (GNU Emacs and the earlier Emacsen), and —
+concretely — the *de-facto standard for modern Lisp formatting is the
+indentation engine of Emacs's major modes*. A neutral crate that ignored Emacs
+would not be neutral; it would be less useful. So `lispexp-emacs` is
+deliberately the home for the Emacs knowledge every Lisp formatter / linter /
+LSP otherwise re-derives. Planned modules:
+
+- `indent` (this change) — the bundled standard indent-spec table.
+- `local_vars` — readers for Emacs **file-local variables**: the leading
+  `-*- mode: …; lexical-binding: t; … -*-` header cookie and the trailing
+  `Local Variables:` … `End:` block, surfaced as a key/value map.
+- `dir_locals` — a *simple evaluator* for `.dir-locals.el`: read the elisp alist
+  (via `lispexp`'s own reader) and resolve its `(mode . ((var . value) …))` /
+  per-directory / `nil`-mode structure into applicable variables.
+
+**Safety boundary — read & interpret, never execute.** `.dir-locals.el` and a
+`Local Variables:` block can, in Emacs, carry `eval` forms that run arbitrary
+elisp. `lispexp` evaluates nothing (ADR-0001), so this crate resolves only the
+*structural* entries (mode/directory → variable/value) and **surfaces `eval`
+entries as data without executing them** (a limited opt-in evaluation could be
+layered later, but never arbitrary elisp). This keeps the reader-only spirit
+while still covering the overwhelming common case — `indent-tabs-mode`,
+`lexical-binding`, mode-scoped variables, and the like.
 
 **Two axes bound what belongs in `lispexp-emacs` — and what does not:**
 
