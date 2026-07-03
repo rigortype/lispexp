@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `local_vars` module — read Emacs file-local variables into raw `name → value-text` bindings: the leading `-*- … -*-` header cookie (variable form and the bare `-*- mode -*-` shorthand, shebang-aware) and the trailing `Local Variables:` … `End:` block (comment-prefix aware). `file_locals(source) -> FileLocals` with last-wins `get`. Read & interpret, never execute: an `eval:` entry is surfaced as data (a binding named `eval`), never run.
+
 ## [0.1.0]
 
 Initial release: the Emacs-specific integration companion crate for `lispexp` — a home for Emacs knowledge (data and interpreters) kept out of the neutral reader core (ADR-0033). It opens with the bundled standard indent table split out of lisplens's formatter.
