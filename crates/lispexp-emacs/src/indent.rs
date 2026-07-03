@@ -22,8 +22,10 @@
 //!
 //! # Provenance
 //!
-//! Emacs is the source of truth; this table is *harvested*, not transcribed.
-//! Regenerate against your target Emacs with `emacs -Q --batch --load dump.el`:
+//! Emacs is the source of truth; the table below was *harvested once* from a
+//! running Emacs and is bundled as constants — it is **not** fetched at runtime
+//! (this crate runs no Emacs). To regenerate it against your target Emacs, run
+//! `emacs -Q --batch --load dump.el`:
 //!
 //! ```elisp
 //! ;; dump.el

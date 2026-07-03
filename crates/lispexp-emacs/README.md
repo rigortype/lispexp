@@ -35,7 +35,7 @@ table.merge(harvest_indent_specs(source));
 
 ### Provenance
 
-The table is **harvested from a running Emacs**, not transcribed from a standard. The regeneration recipe (a `dump.el` run under `emacs -Q --batch`, with `cc-mode` and other common packages loaded) is in the `indent` module docs. Refreshing for a new Emacs release or package set is a change to this crate alone — never a `lispexp` core release.
+The table is a **bundled constant** — harvested *once* from a running Emacs (not transcribed from a standard) and shipped as `const` data; it is **not** fetched at runtime, and this crate never runs Emacs. The regeneration recipe (a `dump.el` run under `emacs -Q --batch`, with `cc-mode` and other common packages loaded) is in the `indent` module docs. Refreshing for a new Emacs release or package set is a change to this crate alone — never a `lispexp` core release.
 
 ## License
 
