@@ -14,8 +14,8 @@
 //! Scope, by axis (ADR-0033):
 //! - **In scope:** Emacs-specific integration —
 //!   - [`indent`] — the bundled standard indent-spec table.
-//!   - *planned* `local_vars` — Emacs file-local variables: the leading
-//!     `-*- … -*-` header cookie and the trailing `Local Variables:` block.
+//!   - [`local_vars`] — Emacs file-local variables: the leading `-*- … -*-`
+//!     header cookie and the trailing `Local Variables:` block.
 //!   - *planned* `dir_locals` — a simple evaluator for `.dir-locals.el` (an
 //!     elisp data file `lispexp` already reads).
 //! - **Out of scope, editor-*neutral*:** file-extension → dialect selection —
@@ -32,3 +32,4 @@
 //! runs on.
 
 pub mod indent;
+pub mod local_vars;
