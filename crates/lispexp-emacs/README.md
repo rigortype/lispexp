@@ -11,7 +11,7 @@ Emacs is not an arbitrary target: Lisp tooling is historically inseparable from 
 - **In scope** — Emacs integration:
   - `indent` — the bundled standard indent-spec table.
   - `local_vars` — Emacs file-local variables: the leading `-*- … -*-` header cookie and the trailing `Local Variables:` block, as raw `name → value` bindings.
-  - *planned* `dir_locals` — a simple evaluator for `.dir-locals.el`.
+  - `dir_locals` — a simple evaluator for `.dir-locals.el`: resolves mode/subdir structure into raw `name → value` bindings; never runs elisp.
 - **Out of scope, editor-neutral** — file-extension → dialect selection is deliberately the caller's, not Emacs-specific (lispexp ADR-0012, ADR-0034).
 - **Out of scope, foreign format** — EditorConfig and the like are not S-expressions; a consumer's rendering-policy concern.
 

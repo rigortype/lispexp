@@ -16,8 +16,9 @@
 //!   - [`indent`] — the bundled standard indent-spec table.
 //!   - [`local_vars`] — Emacs file-local variables: the leading `-*- … -*-`
 //!     header cookie and the trailing `Local Variables:` block.
-//!   - *planned* `dir_locals` — a simple evaluator for `.dir-locals.el` (an
-//!     elisp data file `lispexp` already reads).
+//!   - [`dir_locals`] — a simple evaluator for `.dir-locals.el` (an elisp data
+//!     file `lispexp` already reads): resolves mode/subdir structure, never
+//!     runs elisp.
 //! - **Out of scope, editor-*neutral*:** file-extension → dialect selection —
 //!   that is deliberately the caller's, not Emacs-specific (lispexp ADR-0012,
 //!   ADR-0034).
@@ -31,5 +32,6 @@
 //! *algorithm* (`calculate-lisp-indent`); this crate supplies the *data* it
 //! runs on.
 
+pub mod dir_locals;
 pub mod indent;
 pub mod local_vars;
