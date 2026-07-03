@@ -1,0 +1,15 @@
+[package]
+name = "lispexp-emacs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "Apache-2.0"
+description = "Emacs-specific integration data for lispexp: the bundled standard indent-spec table (harvested from Emacs), with more Emacs knowledge to come"
+readme = "README.md"
+repository = "https://github.com/rigortype/lispexp"
+authors = ["USAMI Kenta <tadsan@zonu.me>"]
+keywords = ["lisp", "emacs", "indent", "lispexp", "formatter"]
+categories = ["development-tools"]
+
+[dependencies]
+lispexp = { path = "../..", version = "0.5" }
