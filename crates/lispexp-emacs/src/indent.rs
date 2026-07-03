@@ -1,16 +1,16 @@
-//! Bundled standard Emacs indent-spec data for [`lispexp`] (ADR-0033).
+//! Bundled standard Emacs indent-spec data (ADR-0033).
 //!
 //! `lispexp::indent` owns the *mechanism* — [`IndentSpec`], [`IndentTable`], and
-//! `harvest_indent_specs` (a file's own `declare`/`put` specs). This companion
-//! crate ships the *standard data* Emacs carries built-in (`if` → 2, `defun` →
-//! `defun`, `cl-flet` → 1, …), so a formatter matches a file indented by a
+//! `harvest_indent_specs` (a file's own `declare`/`put` specs). This module
+//! ships the *standard data* Emacs carries built-in (`if` → 2, `defun` → 2,
+//! `lambda` → `defun`, …), so a formatter matches a file indented by a
 //! fully-loaded Emacs without re-harvesting it by hand. The indent *algorithm*
-//! (`calculate-lisp-indent`) stays the consumer's — this crate is data only.
+//! (`calculate-lisp-indent`) stays the consumer's — this is data only.
 //!
 //! ```
 //! use lispexp::Dialect;
 //! use lispexp::indent::{harvest_indent_specs, IndentSpec};
-//! use lispexp_emacs_indent::bundled_table;
+//! use lispexp_emacs::indent::bundled_table;
 //!
 //! // Start from the bundled standard specs, then layer a file's own on top.
 //! let mut table = bundled_table(Dialect::EmacsLisp);

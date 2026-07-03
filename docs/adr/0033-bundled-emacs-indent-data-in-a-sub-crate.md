@@ -1,4 +1,4 @@
-# Bundled Emacs indent-spec *data* ships as a companion sub-crate, not the reader core
+# Emacs-specific integration lives in a companion crate (`lispexp-emacs`), not the reader core — starting with the bundled indent table
 
 ## Context
 
@@ -22,25 +22,50 @@ proposes: **lispexp owns the data, the consumer owns the indent algorithm**
 (`calculate-lisp-indent`, which is rendering — out of reader-only scope,
 ADR-0001).
 
-The open question this ADR settles is *where* the data lives: the reader core
-crate, or a separate home.
+The open question this ADR settles is *where* the data lives — the reader core
+crate, or a separate home — and, once separate, at *what unit*: a crate for this
+one table, or a broader home for Emacs-specific knowledge generally (the indent
+table is only the first of several: a major-mode registry, a `.dir-locals.el`
+interpreter, …).
 
 ## Decision
 
-**The bundled Emacs indent-spec data lives in a companion crate,
-`lispexp-emacs-indent`, a workspace member in this repository — not in the
-`lispexp` core crate.** The core keeps the mechanism (`IndentSpec`,
-`IndentTable`, `harvest_indent_specs`); the companion crate depends on `lispexp`
-and exposes:
+**Emacs-specific integration lives in one companion crate, `lispexp-emacs`, a
+workspace member in this repository — not in the `lispexp` core crate.** The
+core keeps the mechanism (`IndentSpec`, `IndentTable`, `harvest_indent_specs`);
+`lispexp-emacs` depends on `lispexp` and holds the Emacs-specific *data and
+interpreters*, one module per concern. Its first tenant is the bundled indent
+table:
 
 ```rust
-pub fn bundled_table(dialect: Dialect) -> IndentTable
+pub fn lispexp_emacs::indent::bundled_table(dialect: Dialect) -> IndentTable
 ```
 
 returning the built-in table for `Dialect::EmacsLisp` and an empty table for
 every other dialect (these specs are Emacs-specific; no other target dialect has
 an equivalent standard set — ADR-0031). A consumer layers a file's harvested
-specs on top with `IndentTable::merge`, exactly as before.
+specs on top with `IndentTable::merge`.
+
+**The crate's unit is "Emacs-specific integration," not "Emacs indent."** These
+concerns cohere — all make a tool match Emacs's view of Lisp, all are
+Emacs-version-sensitive, all depend only on `lispexp` — so one crate (modules,
+optionally feature-gated) beats both a single-table crate (too narrow; the next
+Emacs concern needs a new crate) and per-concern crates (proliferation,
+versioning/discoverability overhead). Planned modules: `indent` (this change),
+a major-mode registry, and a `.dir-locals.el` interpreter — the last reads an
+elisp data file `lispexp` already parses, so it is natural here.
+
+**Two axes bound what belongs in `lispexp-emacs` — and what does not:**
+
+- **Editor-*neutral* concerns stay out.** File-extension → dialect selection is
+  not Emacs-specific and is *deliberately the caller's*, not the core's
+  (ADR-0012); it must not ride in an Emacs crate. If its duplication ever earns
+  a home, that is a separate editor-neutral data crate, not this one.
+- **Foreign, non-S-expression formats stay out entirely.** EditorConfig and the
+  like are not S-expressions; parsing them pulls a foreign format and deps into
+  the `lispexp` family, and mapping their properties to Lisp formatting is
+  rendering *policy*. That belongs in the consumer (or its own unrelated crate),
+  never in `lispexp` or `lispexp-emacs` (ADR-0001, ADR-0013).
 
 **Why a sub-crate rather than `indent::bundled_table` in core:**
 
@@ -80,25 +105,25 @@ data going forward.
 | Layer | Owner |
 |---|---|
 | `IndentSpec` / `IndentTable` / `harvest_indent_specs` (mechanism) | `lispexp` core |
-| Bundled Emacs standard indent data + provenance/recipe | `lispexp-emacs-indent` |
+| Bundled Emacs standard indent data + provenance/recipe (`indent` module) | `lispexp-emacs` |
 | `calculate-lisp-indent` indent *algorithm* (rendering) | the consumer (lisplens) |
 
 ## Consequences
 
-- lisplens deletes its 342-entry table and depends on `lispexp-emacs-indent`;
-  future consumers get the same data for free. The reader core stays lean and
-  dialect-neutral.
+- lisplens deletes its 342-entry table and depends on `lispexp-emacs`
+  (`indent::bundled_table`); future consumers get the same data for free. The
+  reader core stays lean and dialect-neutral.
 - The companion crate carries a provenance note: the Emacs version and the
   packages loaded at harvest time, plus the dump recipe, so the table can be
   regenerated deterministically and audited. Refreshing for a new Emacs release
   is a companion-crate change, not a core release.
-- Publishing is decoupled: `lispexp-emacs-indent` versions and publishes on its
-  own cadence (it depends on a published `lispexp`), so a data refresh never
-  forces a core version bump. Wiring its own tag/publish flow is follow-up work;
-  in-repo path/git use unblocks lisplens immediately.
+- Publishing is decoupled: `lispexp-emacs` versions and publishes on its own
+  cadence (it depends on a published `lispexp`), so a data refresh — or a new
+  Emacs module — never forces a core version bump. Wiring its own tag/publish
+  flow is follow-up work; in-repo path/git use unblocks lisplens immediately.
 - This repository becomes a Cargo workspace (root `lispexp` package +
-  `crates/lispexp-emacs-indent`). The single-context domain layout (one
-  `CONTEXT.md` + `docs/adr/`) is unchanged.
+  `crates/lispexp-emacs`). The single-context domain layout (one `CONTEXT.md` +
+  `docs/adr/`) is unchanged.
 - If `lispexp` ever grows a formatting layer, the indent *algorithm* would be a
   further crate (e.g. `lispexp-fmt`), with this data crate as its natural first
   half. Out of scope here (ADR-0001 keeps rendering out of core).

@@ -20,5 +20,5 @@ exclude = ["/tests/corpus", "/AGENTS.md", "/docs/agents", "/docs/cccc", "/.githu
 # The root `lispexp` package is an implicit member. The companion crate holds
 # bulk, editor-version-specific bundled data kept out of the neutral core
 # (ADR-0033).
-members = ["crates/lispexp-emacs-indent"]
+members = ["crates/lispexp-emacs"]
 resolver = "2"

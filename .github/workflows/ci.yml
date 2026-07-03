@@ -30,7 +30,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
       - name: Package (dry run)
         # Only the core crate publishes via the vX.Y.Z tag flow; the companion
-        # crate (crates/lispexp-emacs-indent) versions and publishes separately.
+        # crate (crates/lispexp-emacs) versions and publishes separately.
         run: cargo publish --dry-run -p lispexp
 
   msrv:

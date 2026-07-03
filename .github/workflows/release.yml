@@ -32,7 +32,7 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         # The vX.Y.Z tag maps to the core crate's version; the companion crate
-        # (crates/lispexp-emacs-indent) publishes on its own cadence.
+        # (crates/lispexp-emacs) publishes on its own cadence.
         run: cargo publish -p lispexp
 
       - name: Create GitHub Release
