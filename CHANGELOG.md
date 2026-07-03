@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `detect` module — opt-in, content-aware dialect detection (ADR-0034). `detect(filename, source)` returns a best-effort `Detection { dialect, confidence, reason }` by combining an extension registry with content signals (a `#lang` directive → Racket, a shebang interpreter, and structural markers that disambiguate shared extensions such as `.scm` Guile-vs-superset and `.lsp` AutoLISP-vs-Common-Lisp); `detect_project` aggregates per-file votes order-independently. `dialect` is `None` when nothing fires — never a wrong silent default. The reader stays passive: detection is a layer a caller uses to *choose* `Options`, not the reader inferring (ADR-0012 preserved).
+- `Dialect::from_extension(ext) -> &[Dialect]` and `Dialect::extensions() -> &[&str]` — the extension registry, centralizing data previously scattered across the `Dialect` rustdoc; a shared extension returns several candidates.
+
 ## [0.5.0] - 2026-07-03
 
 A small, breaking release for text-based consumers. An improper/dotted list now records the byte span of its `.` separator, so a reindenter can align a tail continuation under the dot — the `'(eval . FORM)` font-lock idiom — without re-scanning the source.
