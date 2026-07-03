@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - `local_vars` module — read Emacs file-local variables into raw `name → value-text` bindings: the leading `-*- … -*-` header cookie (variable form and the bare `-*- mode -*-` shorthand, shebang-aware) and the trailing `Local Variables:` … `End:` block (comment-prefix aware). `file_locals(source) -> FileLocals` with last-wins `get`. Read & interpret, never execute: an `eval:` entry is surfaced as data (a binding named `eval`), never run.
-- `dir_locals` module — a simple evaluator for `.dir-locals.el` (read via `lispexp`'s Emacs Lisp reader). `DirLocals::parse(content)` resolves the mode-keyed alist — `nil` = all modes, both `(MODE . VARS)` and `(MODE VARS…)` forms, and one level of `("subdir" . …)` nesting — into raw `name → value-text` bindings; `for_mode(mode)` returns the applicable top-level vars (nil first, then mode-specific). Read & interpret, never execute: `eval` entries are surfaced as verbatim data, never run.
+- `dir_locals` module — a simple evaluator for `.dir-locals.el` (read via `lispexp`'s Emacs Lisp reader). `DirLocals::parse(content)` resolves the mode-keyed alist — `nil` = all modes, both `(MODE . VARS)` and `(MODE VARS…)` forms, and one level of `("subdir" . …)` nesting — into raw `name → value-text` bindings. `for_mode(mode)` returns the applicable top-level vars (nil first, then mode-specific); `for_path(mode, relpath)` additionally applies subdirectory-scoped groups whose directory is an ancestor of the file's path, outer-to-inner (nearest wins), matching on a directory boundary. Read & interpret, never execute: `eval` entries are surfaced as verbatim data, never run.
 
 ## [0.1.0]
 

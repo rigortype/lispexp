@@ -72,25 +72,88 @@ impl DirLocals {
     /// The top-level (non-subdirectory) variables that apply to `mode`, in
     /// application order: the `nil` = all-modes bindings first, then `mode`'s own
     /// (so a mode-specific binding overrides an all-modes one — apply last-wins).
+    ///
+    /// Equivalent to [`for_path`](DirLocals::for_path) with an empty path — it
+    /// ignores subdirectory-scoped groups. Use `for_path` to resolve a file
+    /// under a subdirectory.
     #[must_use]
     pub fn for_mode(&self, mode: &str) -> Vec<(&str, &str)> {
+        self.for_path(mode, "")
+    }
+
+    /// The variables that apply to a file at `relpath` (relative to the
+    /// `.dir-locals.el`'s directory, forward-slash separated) in major mode
+    /// `mode`.
+    ///
+    /// Scopes are applied outer-to-inner so the nearest wins under last-wins:
+    /// first the top-level groups, then each `("subdir" . …)` whose directory is
+    /// an ancestor of `relpath`, ordered shallowest-first. Within each scope the
+    /// `nil` = all-modes bindings come before `mode`'s own. A subdir matches on a
+    /// directory boundary — `"foo"` covers `foo/bar.el` but not `foobar.el`.
+    #[must_use]
+    pub fn for_path(&self, mode: &str, relpath: &str) -> Vec<(&str, &str)> {
+        let rel = relpath.trim_start_matches("./");
+        // Distinct matching subdirs, shallowest-first (stable within equal depth).
+        let mut subdirs: Vec<&str> = Vec::new();
+        for e in &self.entries {
+            if let Some(s) = e.subdir.as_deref() {
+                if under_dir(rel, s) && !subdirs.contains(&s) {
+                    subdirs.push(s);
+                }
+            }
+        }
+        subdirs.sort_by_key(|s| depth(s));
+
         let mut out = Vec::new();
+        self.emit_scope(None, mode, &mut out);
+        for s in subdirs {
+            self.emit_scope(Some(s), mode, &mut out);
+        }
+        out
+    }
+
+    /// Append the bindings of one scope (`None` = top level, `Some(dir)` = a
+    /// subdir), `nil`-mode first then `mode`-specific.
+    fn emit_scope<'a>(
+        &'a self,
+        scope: Option<&str>,
+        mode: &str,
+        out: &mut Vec<(&'a str, &'a str)>,
+    ) {
         for want_specific in [false, true] {
             for e in &self.entries {
-                if e.subdir.is_some() {
+                if e.subdir.as_deref() != scope {
                     continue;
                 }
                 let matches = match &e.mode {
-                    None => !want_specific,                // nil pass
-                    Some(m) => want_specific && m == mode, // specific pass
+                    None => !want_specific,
+                    Some(m) => want_specific && m == mode,
                 };
                 if matches {
                     out.extend(e.vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
                 }
             }
         }
-        out
     }
+}
+
+/// Whether a file at `rel` sits under the directory `dir` (matching on a `/`
+/// boundary, trailing slash on `dir` ignored). An empty `dir` matches nothing.
+fn under_dir(rel: &str, dir: &str) -> bool {
+    let dir = dir.trim_end_matches('/');
+    if dir.is_empty() {
+        return false;
+    }
+    rel.strip_prefix(dir)
+        .is_some_and(|after| after.starts_with('/'))
+}
+
+/// The directory depth (segment count) of a subdir key, for shallow-first order.
+fn depth(dir: &str) -> usize {
+    dir.trim_matches('/')
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .count()
 }
 
 /// Read one top-level alist element into `out`. A *string* key opens a
@@ -228,6 +291,54 @@ mod tests {
             .expect("subdir entry");
         assert_eq!(sub.mode.as_deref(), Some("emacs-lisp-mode"));
         assert_eq!(sub.vars, vec![("b".to_string(), "2".to_string())]);
+    }
+
+    #[test]
+    fn for_path_applies_matching_subdir_after_top_level() {
+        let dl = DirLocals::parse("((nil . ((a . 1))) (\"tests\" . ((nil . ((a . 2))))))");
+        // A file under tests/ gets top-level then the subdir (last-wins → 2).
+        assert_eq!(
+            dl.for_path("emacs-lisp-mode", "tests/foo.el"),
+            vec![("a", "1"), ("a", "2")]
+        );
+        // A file outside tests/ gets only the top-level binding.
+        assert_eq!(dl.for_path("emacs-lisp-mode", "foo.el"), vec![("a", "1")]);
+        // for_mode ignores subdirs entirely.
+        assert_eq!(dl.for_mode("emacs-lisp-mode"), vec![("a", "1")]);
+    }
+
+    #[test]
+    fn deeper_subdir_overrides_shallower() {
+        let dl = DirLocals::parse(
+            "((\"src/inner\" . ((nil . ((a . 3))))) (\"src\" . ((nil . ((a . 2))))))",
+        );
+        // Regardless of source order, shallower (src) applies before deeper (src/inner).
+        assert_eq!(
+            dl.for_path("m", "src/inner/f.el"),
+            vec![("a", "2"), ("a", "3")]
+        );
+        assert_eq!(dl.for_path("m", "src/f.el"), vec![("a", "2")]);
+    }
+
+    #[test]
+    fn subdir_matches_on_a_directory_boundary() {
+        let dl = DirLocals::parse("((\"foo\" . ((nil . ((a . 1))))))");
+        assert_eq!(dl.for_path("m", "foo/bar.el"), vec![("a", "1")]);
+        // "foobar.el" is not under directory "foo".
+        assert!(dl.for_path("m", "foobar.el").is_empty());
+        // A trailing slash on the key is tolerated.
+        let dl2 = DirLocals::parse("((\"foo/\" . ((nil . ((a . 1))))))");
+        assert_eq!(dl2.for_path("m", "foo/bar.el"), vec![("a", "1")]);
+    }
+
+    #[test]
+    fn mode_specific_subdir_entry_respects_mode() {
+        let dl = DirLocals::parse("((\"tests\" . ((emacs-lisp-mode . ((a . 9))))))");
+        assert_eq!(
+            dl.for_path("emacs-lisp-mode", "tests/f.el"),
+            vec![("a", "9")]
+        );
+        assert!(dl.for_path("scheme-mode", "tests/f.el").is_empty());
     }
 
     #[test]
