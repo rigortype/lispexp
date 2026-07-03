@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-03
+
+Opt-in dialect detection. The reader core is unchanged and still passive — this adds a *separate* layer a caller uses to pick which dialect to read a file with, plus the extension registry behind it.
+
 ### Added
 
 - `detect` module — opt-in, content-aware dialect detection (ADR-0034). `detect(filename, source)` returns a best-effort `Detection { dialect, confidence, reason }` by combining an extension registry with content signals (a `#lang` directive → Racket, a shebang interpreter, and structural markers that disambiguate shared extensions such as `.scm` Guile-vs-superset and `.lsp` AutoLISP-vs-Common-Lisp); `detect_project` aggregates per-file votes order-independently. `dialect` is `None` when nothing fires — never a wrong silent default. The reader stays passive: detection is a layer a caller uses to *choose* `Options`, not the reader inferring (ADR-0012 preserved).
@@ -130,7 +134,8 @@ Initial release: a pure-Rust, reader-only lexer and parser for S-expression synt
 - `lispexp::annotate`: a definition-form annotator that tags a form's parts (name, arglist, docstring, body) using declared metadata and a spec harvester that reads Emacs Lisp def-macros' own arglist parameter names.
 - Continuous parse-conformance corpus tests over real-world code (chibi-scheme, clojure/clojure, cl-ppcre, lem, magit, typed-racket).
 
-[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rigortype/lispexp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rigortype/lispexp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rigortype/lispexp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rigortype/lispexp/releases/tag/v0.3.0
