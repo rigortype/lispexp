@@ -1,0 +1,55 @@
+name: Release lispexp-emacs
+
+# Publishes the `lispexp-emacs` companion crate to crates.io and creates a
+# GitHub Release when an `emacs-vX.Y.Z` tag is pushed. Separate from the core
+# `lispexp` release (release.yml, `vX.Y.Z`) so the companion versions on its own
+# cadence (ADR-0033). It depends on a published `lispexp`, so tag this only after
+# the core version it requires is live on crates.io. Requires the repository
+# secret CARGO_REGISTRY_TOKEN.
+
+on:
+  push:
+    tags: ["emacs-v*"]
+
+permissions:
+  contents: write # create the GitHub Release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#emacs-v}"
+          crate="$(grep -m1 '^version' crates/lispexp-emacs/Cargo.toml | sed -E 's/version *= *"([^"]+)".*/\1/')"
+          echo "tag=$tag crate=$crate"
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::tag emacs-v$tag does not match crates/lispexp-emacs/Cargo.toml version $crate"
+            exit 1
+          fi
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p lispexp-emacs
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#emacs-v}"
+          # Extract this version's section from the crate's CHANGELOG as the body.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { p = 1; next }
+            p && /^## \[/ { exit }
+            p { print }
+          ' crates/lispexp-emacs/CHANGELOG.md > release-body.md
+          if [ ! -s release-body.md ]; then
+            echo "Release ${GITHUB_REF_NAME}." > release-body.md
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-body.md
