@@ -77,6 +77,9 @@
 //!   ADR-0031/0032).
 //! - [`indent`] — harvests Emacs Lisp indent specs into a `symbol → IndentSpec`
 //!   table (ADR-0022).
+//! - [`detect`] — opt-in, content-aware dialect detection (extension registry +
+//!   `#lang`/shebang/structural signals) that *picks* an `Options` for you; the
+//!   reader itself stays passive (ADR-0034, ADR-0012).
 //! - [`parse_form_at`] — reads exactly one top-level form at a byte offset, for
 //!   incremental re-validation after an edit (ADR-0023).
 //! - [`LineIndex`] — maps byte offsets to 1-based (line, byte-column) (ADR-0024).
@@ -85,6 +88,7 @@
 
 pub mod annotate;
 mod datum;
+pub mod detect;
 mod error;
 pub mod indent;
 mod lexer;
