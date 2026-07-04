@@ -19,3 +19,21 @@
 [submodule "tests/corpus/gauche"]
 	path = tests/corpus/gauche
 	url = https://github.com/shirok/Gauche
+[submodule "tests/corpus/phel-lang"]
+	path = tests/corpus/phel-lang
+	url = https://github.com/phel-lang/phel-lang
+[submodule "tests/corpus/janet"]
+	path = tests/corpus/janet
+	url = https://github.com/janet-lang/janet
+[submodule "tests/corpus/hy"]
+	path = tests/corpus/hy
+	url = https://github.com/hylang/hy
+[submodule "tests/corpus/fennel"]
+	path = tests/corpus/fennel
+	url = https://github.com/bakpakin/fennel
+[submodule "tests/corpus/lfe"]
+	path = tests/corpus/lfe
+	url = https://github.com/lfe/lfe
+[submodule "tests/corpus/eisl"]
+	path = tests/corpus/eisl
+	url = https://github.com/sasagawa888/eisl
