@@ -74,3 +74,29 @@ fn commas_are_whitespace() {
     assert_eq!(items[0].kind, DatumKind::Number("1"));
     assert_eq!(items[1].kind, DatumKind::Number("2"));
 }
+
+#[test]
+fn semicolon_is_a_symbol_constituent() {
+    // Phel's atom grammar admits `;`: `foo;bar` is one symbol, and the quoted
+    // `'*_.%;!:+-?` (from Phel's own tests) reads whole rather than being cut at `;`.
+    assert_eq!(phel("foo;bar")[0].kind, DatumKind::Symbol("foo;bar"));
+
+    let data = phel("'*_.%;!:+-?");
+    let DatumKind::Prefixed { prefix, inner, .. } = &data[0].kind else {
+        panic!("expected a quoted form, got {:?}", data[0].kind)
+    };
+    assert_eq!(*prefix, Prefix::Quote);
+    assert_eq!(inner.kind, DatumKind::Symbol("*_.%;!:+-?"));
+}
+
+#[test]
+fn semicolon_at_a_token_boundary_still_comments() {
+    // A `;` that begins a token is a line comment, even in Phel.
+    let data = phel("(foo ;bar\n baz)");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, DatumKind::Symbol("foo"));
+    assert_eq!(items[1].kind, DatumKind::Symbol("baz"));
+}

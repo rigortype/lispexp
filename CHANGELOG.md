@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - `Options.keep_discarded` (`bool`, default `false`) — keep a `#_` / `#;` discarded form in the tree as a `DatumKind::Prefixed` with `Prefix::Discard`, instead of dropping it. Off by default (right for an evaluator or a structural query); a round-trip / formatting consumer sets it (a `mut` field, since `Options` is `#[non_exhaustive]`) so it can still see a discarded form's span and shape — e.g. to reindent inside `#_(…)`. Reported downstream by lisplens.
+- `Options.line_comment_in_atom` (`bool`, default `false`) — whether the line-comment character is an ordinary symbol constituent *inside* a token, so it starts a comment only at a token boundary. Set for **Phel**, whose atom grammar admits `;`.
+
+### Fixed
+
+- **Phel:** a `;` inside a symbol is no longer mis-read as a line comment. Phel's own lexer accepts `;` in atoms (`foo;bar` is one symbol; the quoted `'*_.%;!:+-?` from Phel's tests reads whole), while `;` at a token boundary is still a comment (`foo ;bar`). Previously the reader cut the symbol at `;` and swallowed the rest of the line, unbalancing the following forms — a faithfulness gap (ADR-0030), reported downstream by lisplens.
 
 ## [0.6.0] - 2026-07-03
 

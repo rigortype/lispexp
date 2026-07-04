@@ -376,6 +376,12 @@ pub struct Options {
     /// This is a caller preference, not a dialect trait, so it stays `false` in every
     /// dialect preset; set it explicitly (`Options { keep_discarded: true, ..base }`).
     pub keep_discarded: bool,
+    /// Whether the [`line_comment`](Self::line_comment) character is an ordinary
+    /// symbol constituent *inside* a token — so it starts a comment only at a token
+    /// boundary, not mid-symbol. Phel's atom grammar admits `;` (`foo;bar` is one
+    /// symbol; `foo ;bar` is a symbol and a comment); every other dialect terminates
+    /// a symbol at the comment character. Default `false`.
+    pub line_comment_in_atom: bool,
     /// Whether `#` introduces reader syntax (`#t`, `#\`, `#(`, ...).
     pub hash_syntax: bool,
     /// Role of `[` `]`.
@@ -486,6 +492,7 @@ impl Options {
             datum_comment: true,
             discard_underscore: false,
             keep_discarded: false,
+            line_comment_in_atom: false,
             hash_syntax: true,
             square: DelimRole::List,
             // R7RS reserves `{` `}` for future use; treat as ordinary so the
@@ -532,6 +539,7 @@ impl Options {
             datum_comment: false,
             discard_underscore: true,
             keep_discarded: false,
+            line_comment_in_atom: false,
             hash_syntax: true,
             square: DelimRole::Vector,
             curly: DelimRole::Map,
@@ -582,6 +590,7 @@ impl Options {
             datum_comment: false,
             discard_underscore: false,
             keep_discarded: false,
+            line_comment_in_atom: false,
             hash_syntax: true,
             // `[` `]` `{` `}` are not standard delimiters in CL.
             square: DelimRole::Ordinary,
@@ -631,6 +640,7 @@ impl Options {
             datum_comment: false,
             discard_underscore: false,
             keep_discarded: false,
+            line_comment_in_atom: false,
             hash_syntax: true,
             square: DelimRole::Vector, // `[...]` is a data vector
             curly: DelimRole::Ordinary,
@@ -786,8 +796,13 @@ impl Options {
     #[must_use]
     pub fn phel() -> Self {
         // Phel's reader is essentially Clojure's; #php tagged literals are
-        // already covered by tagged_literals.
-        Options::clojure()
+        // already covered by tagged_literals. It differs in one lexical detail:
+        // `;` is an atom constituent (only a comment at a token boundary), so
+        // symbols like `foo;bar` and the quoted `'*_.%;!:+-?` read whole.
+        Options {
+            line_comment_in_atom: true,
+            ..Options::clojure()
+        }
     }
 
     /// EDN — a data-only preset layered on [`Options::clojure`] with the

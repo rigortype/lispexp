@@ -79,7 +79,10 @@ impl<'a, 'o> Lexer<'a, 'o> {
             || c == '('
             || c == ')'
             || c == '"'
-            || c == self.opts.line_comment
+            // The comment character ends a symbol unless the dialect admits it as an
+            // atom constituent (Phel `foo;bar`); a leading `;` is still a comment,
+            // caught by `next_token` before an atom is ever started.
+            || (c == self.opts.line_comment && !self.opts.line_comment_in_atom)
             || (self.square_active() && (c == '[' || c == ']'))
             || (self.curly_active() && (c == '{' || c == '}'))
     }
