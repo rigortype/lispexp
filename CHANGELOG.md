@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `Options.keep_discarded` (`bool`, default `false`) — keep a `#_` / `#;` discarded form in the tree as a `DatumKind::Prefixed` with `Prefix::Discard`, instead of dropping it. Off by default (right for an evaluator or a structural query); a round-trip / formatting consumer sets it (a `mut` field, since `Options` is `#[non_exhaustive]`) so it can still see a discarded form's span and shape — e.g. to reindent inside `#_(…)`. Reported downstream by lisplens.
+
 ## [0.6.0] - 2026-07-03
 
 Opt-in dialect detection. The reader core is unchanged and still passive — this adds a *separate* layer a caller uses to pick which dialect to read a file with, plus the extension registry behind it.

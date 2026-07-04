@@ -244,11 +244,14 @@ impl<'a, 'o> Parser<'a, 'o> {
             let t = self.peek()?;
             match t.kind {
                 TokenKind::Close(_) => return None,
-                TokenKind::Prefix(Prefix::Discard) => {
+                // `keep_discarded` keeps the form (falls through to the generic
+                // prefix arm below, which builds a `Prefixed { Discard, inner }`);
+                // otherwise the next datum is dropped entirely.
+                TokenKind::Prefix(Prefix::Discard) if !self.opts.keep_discarded => {
                     self.advance();
-                    // Drop the next datum entirely. If none follows (`#;` at EOF
-                    // or before a stray close), report it like any other dangling
-                    // prefix instead of silently swallowing it (R1b).
+                    // If none follows (`#;` at EOF or before a stray close), report it
+                    // like any other dangling prefix instead of silently swallowing it
+                    // (R1b).
                     if self.parse_datum().is_none() {
                         self.error(
                             t.span,

@@ -246,3 +246,47 @@ fn quote_longhand_not_folded() {
     assert_eq!(items[0].kind, DatumKind::Symbol("quote"));
     assert_eq!(items[1].kind, DatumKind::Symbol("x"));
 }
+
+#[test]
+fn discard_is_dropped_by_default() {
+    // `#_` drops the next datum: the vector reads as `[a c]`.
+    let data = clj("[a #_b c]");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!()
+    };
+    let names: Vec<_> = items
+        .iter()
+        .map(|d| match &d.kind {
+            DatumKind::Symbol(s) => *s,
+            _ => "?",
+        })
+        .collect();
+    assert_eq!(names, ["a", "c"]);
+}
+
+#[test]
+fn keep_discarded_retains_the_form() {
+    // With `keep_discarded`, `#_b` stays as a `Prefixed { Discard, b }`, so a
+    // round-trip consumer can still see its span and shape. `Options` is
+    // `#[non_exhaustive]`, so a caller mutates the field rather than struct-updating.
+    let mut opts = Options::clojure();
+    opts.keep_discarded = true;
+    let parsed = parse("[a #_(b c) d]", &opts);
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let DatumKind::List { items, .. } = &parsed.data[0].kind else {
+        panic!()
+    };
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].kind, DatumKind::Symbol("a"));
+    assert_eq!(items[2].kind, DatumKind::Symbol("d"));
+    let DatumKind::Prefixed { prefix, inner, .. } = &items[1].kind else {
+        panic!("expected a kept discard, got {:?}", items[1].kind)
+    };
+    assert_eq!(*prefix, Prefix::Discard);
+    // The discarded form's inner list is preserved with its real span.
+    assert!(matches!(inner.kind, DatumKind::List { .. }));
+    assert_eq!(
+        &"[a #_(b c) d]"[items[1].span.start as usize..items[1].span.end as usize],
+        "#_(b c)"
+    );
+}
