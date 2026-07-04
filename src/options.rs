@@ -382,6 +382,15 @@ pub struct Options {
     /// symbol; `foo ;bar` is a symbol and a comment); every other dialect terminates
     /// a symbol at the comment character. Default `false`.
     pub line_comment_in_atom: bool,
+    /// Whether `|(…)` opens a short anonymous function — Phel's (deprecated but
+    /// still-read) sibling of Clojure's `#(…)`. When set, a `|` *immediately*
+    /// before `(` is a [`HashFn`](crate::Prefix::HashFn) prefix (the `(` then
+    /// opens the body), matching Phel's `\|\(` lexer token; a `|` anywhere else
+    /// is an ordinary symbol constituent (`|foo`, `a|b`), since Phel's atom
+    /// grammar admits `|`. Distinct from Janet's bare
+    /// [`short_fn`](CharRoles::short_fn), which prefixes *any* following datum.
+    /// Default `false`.
+    pub pipe_anon_fn: bool,
     /// Whether `#` introduces reader syntax (`#t`, `#\`, `#(`, ...).
     pub hash_syntax: bool,
     /// Role of `[` `]`.
@@ -493,6 +502,7 @@ impl Options {
             discard_underscore: false,
             keep_discarded: false,
             line_comment_in_atom: false,
+            pipe_anon_fn: false,
             hash_syntax: true,
             square: DelimRole::List,
             // R7RS reserves `{` `}` for future use; treat as ordinary so the
@@ -540,6 +550,7 @@ impl Options {
             discard_underscore: true,
             keep_discarded: false,
             line_comment_in_atom: false,
+            pipe_anon_fn: false,
             hash_syntax: true,
             square: DelimRole::Vector,
             curly: DelimRole::Map,
@@ -591,6 +602,7 @@ impl Options {
             discard_underscore: false,
             keep_discarded: false,
             line_comment_in_atom: false,
+            pipe_anon_fn: false,
             hash_syntax: true,
             // `[` `]` `{` `}` are not standard delimiters in CL.
             square: DelimRole::Ordinary,
@@ -641,6 +653,7 @@ impl Options {
             discard_underscore: false,
             keep_discarded: false,
             line_comment_in_atom: false,
+            pipe_anon_fn: false,
             hash_syntax: true,
             square: DelimRole::Vector, // `[...]` is a data vector
             curly: DelimRole::Ordinary,
@@ -795,12 +808,15 @@ impl Options {
     /// Phel (a Clojure-like Lisp that compiles to PHP).
     #[must_use]
     pub fn phel() -> Self {
-        // Phel's reader is essentially Clojure's; #php tagged literals are
-        // already covered by tagged_literals. It differs in one lexical detail:
-        // `;` is an atom constituent (only a comment at a token boundary), so
-        // symbols like `foo;bar` and the quoted `'*_.%;!:+-?` read whole.
+        // Phel's reader is essentially Clojure's (#php tagged literals are
+        // already covered by tagged_literals), differing in a few lexical
+        // details drawn from its own `Lexer.php`:
+        //   - `;` is an atom constituent (only a comment at a token boundary),
+        //     so symbols like `foo;bar` and the quoted `'*_.%;!:+-?` read whole;
+        //   - `|(…)` is a short anonymous function (`#(…)` still works too).
         Options {
             line_comment_in_atom: true,
+            pipe_anon_fn: true,
             ..Options::clojure()
         }
     }

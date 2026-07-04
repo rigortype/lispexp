@@ -155,6 +155,14 @@ impl<'a, 'o> Lexer<'a, 'o> {
             }
             '"' => return Some(self.lex_string(start)),
             '|' if self.opts.piped_symbols => return Some(self.lex_piped_symbol(start)),
+            // Phel `|(…)` short anonymous function: `|` immediately before `(`
+            // is a HashFn prefix (the `(` opens the body, like Clojure `#(`).
+            // A `|` anywhere else falls through to the atom path, where it is an
+            // ordinary symbol constituent (`|foo`, `a|b`).
+            '|' if self.opts.pipe_anon_fn && self.rest().starts_with("|(") => {
+                self.bump(); // '|'; leave '(' for the list opener
+                return Some(self.token(TokenKind::Prefix(Prefix::HashFn), start));
+            }
             _ => {}
         }
 

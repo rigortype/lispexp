@@ -90,6 +90,39 @@ fn semicolon_is_a_symbol_constituent() {
 }
 
 #[test]
+fn pipe_paren_is_short_anonymous_function() {
+    // `|(+ $ 1)` is Phel's short anonymous function — one HashFn form, exactly
+    // like Clojure's `#(+ % 1)`. `(map |(+ $ 1) xs)` must read as three items
+    // (`map`, the fn, `xs`), not four with a stray `|` symbol.
+    let data = phel("(map |(+ $ 1) xs)");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].kind, DatumKind::Symbol("map"));
+    assert_eq!(items[2].kind, DatumKind::Symbol("xs"));
+    let DatumKind::Prefixed { prefix, inner, .. } = &items[1].kind else {
+        panic!("expected a HashFn form, got {:?}", items[1].kind)
+    };
+    assert_eq!(*prefix, Prefix::HashFn);
+    assert!(matches!(inner.kind, DatumKind::List { .. }));
+    // The `|` belongs to the anon-fn form, not a sibling: its span covers `|(…)`.
+    assert_eq!(
+        &"(map |(+ $ 1) xs)"[items[1].span.start as usize..items[1].span.end as usize],
+        "|(+ $ 1)"
+    );
+}
+
+#[test]
+fn bare_pipe_is_an_ordinary_symbol() {
+    // Only `|(` opens an anon fn; a `|` elsewhere is a symbol constituent (Phel's
+    // atom grammar admits `|`), so `|foo` and `a|b` read as whole symbols and
+    // never become a HashFn prefix.
+    assert_eq!(phel("|foo")[0].kind, DatumKind::Symbol("|foo"));
+    assert_eq!(phel("a|b")[0].kind, DatumKind::Symbol("a|b"));
+}
+
+#[test]
 fn semicolon_at_a_token_boundary_still_comments() {
     // A `;` that begins a token is a line comment, even in Phel.
     let data = phel("(foo ;bar\n baz)");
