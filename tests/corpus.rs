@@ -196,3 +196,84 @@ fn gauche_corpus_parses() {
         &["src/srfis.scm"],
     );
 }
+
+#[test]
+fn phel_corpus_parses() {
+    check_corpus("phel-lang", &["phel"], &Options::phel(), 250, &[]);
+}
+
+#[test]
+fn janet_corpus_parses() {
+    check_corpus("janet", &["janet", "jdn"], &Options::janet(), 80, &[]);
+}
+
+#[test]
+fn hy_corpus_parses() {
+    check_corpus(
+        "hy",
+        &["hy"],
+        &Options::hy(),
+        50,
+        // A deliberately-broken fixture for Hy's own compiler-error test: an
+        // unterminated string literal (`(print "hello)`). The structural error
+        // the reader reports here is exactly correct (ADR-0030).
+        &["tests/resources/importer/compiler_error.hy"],
+    );
+}
+
+#[test]
+fn fennel_corpus_parses() {
+    check_corpus(
+        "fennel",
+        &["fnl"],
+        &Options::fennel(),
+        70,
+        // Deliberately-malformed fixtures under `test/bad/` — Fennel's own
+        // parser-error suite. Only those with *structural* (delimiter) breakage
+        // are excluded; the reader correctly flags them, and the semantically-bad
+        // siblings (balanced but invalid Fennel) rightly still parse clean.
+        &[
+            "test/bad/mismatched-closing.fnl",
+            "test/bad/unexpected-close-top.fnl",
+        ],
+    );
+}
+
+#[test]
+fn lfe_corpus_parses() {
+    check_corpus("lfe", &["lfe"], &Options::lfe(), 50, &[]);
+}
+
+#[test]
+fn clautolisp_corpus_parses() {
+    // clautolisp is a Common Lisp *implementation* of AutoLISP; its own sources
+    // are `.lisp` (excluded here). The `.lsp` files are genuine AutoLISP — the
+    // `autolisp-test`/`autolisp-spec` harness and probes, self-described as
+    // "Pure AutoLISP" — the one dialect that otherwise had only unit tests.
+    check_corpus("clautolisp", &["lsp"], &Options::autolisp(), 100, &[]);
+}
+
+#[test]
+fn eisl_corpus_parses() {
+    check_corpus(
+        "eisl",
+        &["lsp"],
+        &Options::islisp(),
+        120,
+        &[
+            // Easy-ISLisp example/library files using a non-ISO `|>` threading
+            // operator. ISO ISLisp's `|…|` is multiple-escape (bar) symbol syntax
+            // — lispexp models it deliberately (see the `piped_symbol_with_spaces`
+            // test) — so a bare `|>` legitimately begins an (unterminated) bar
+            // symbol under the standard reader surface (ADR-0030). Not an ISO
+            // ISLisp reader construct.
+            "example/dna.lsp",
+            "example/enigma.lsp",
+            "example/production.lsp",
+            "library/elixir.lsp",
+            // Genuinely paren-unbalanced source (34 `(` vs 33 `)`: a missing close
+            // in the WiringPi `delay-seconds` call) — the reader is right to flag it.
+            "example/led.lsp",
+        ],
+    );
+}
