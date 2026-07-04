@@ -79,7 +79,10 @@ impl<'a, 'o> Lexer<'a, 'o> {
             || c == '('
             || c == ')'
             || c == '"'
-            || c == self.opts.line_comment
+            // The comment character ends a symbol unless the dialect admits it as an
+            // atom constituent (Phel `foo;bar`); a leading `;` is still a comment,
+            // caught by `next_token` before an atom is ever started.
+            || (c == self.opts.line_comment && !self.opts.line_comment_in_atom)
             || (self.square_active() && (c == '[' || c == ']'))
             || (self.curly_active() && (c == '{' || c == '}'))
     }
@@ -152,6 +155,14 @@ impl<'a, 'o> Lexer<'a, 'o> {
             }
             '"' => return Some(self.lex_string(start)),
             '|' if self.opts.piped_symbols => return Some(self.lex_piped_symbol(start)),
+            // Phel `|(…)` short anonymous function: `|` immediately before `(`
+            // is a HashFn prefix (the `(` opens the body, like Clojure `#(`).
+            // A `|` anywhere else falls through to the atom path, where it is an
+            // ordinary symbol constituent (`|foo`, `a|b`).
+            '|' if self.opts.pipe_anon_fn && self.rest().starts_with("|(") => {
+                self.bump(); // '|'; leave '(' for the list opener
+                return Some(self.token(TokenKind::Prefix(Prefix::HashFn), start));
+            }
             _ => {}
         }
 
@@ -160,9 +171,18 @@ impl<'a, 'o> Lexer<'a, 'o> {
             return Some(self.lex_hash(start));
         }
 
-        // Character literal with a bare backslash lead (Clojure `\a`).
-        if c == '\\' && self.opts.char_syntax == Some(CharSyntax::Backslash) {
-            return Some(self.lex_char(start));
+        // Character literal with a bare backslash lead (Clojure `\a`; Phel `\a`
+        // too, but Phel yields to PHP FQNs — `\Phel\Lang\Symbol` is a symbol, so
+        // a `\` opens a char only at a genuine char boundary; otherwise fall
+        // through to the atom path, which reads the whole `\Foo\Bar` run).
+        if c == '\\' {
+            match self.opts.char_syntax {
+                Some(CharSyntax::Backslash) => return Some(self.lex_char(start)),
+                Some(CharSyntax::BackslashFqn) if self.backslash_opens_char() => {
+                    return Some(self.lex_char(start));
+                }
+                _ => {}
+            }
         }
 
         // Character literal with a `?` lead (Emacs Lisp `?a`, `?\C-x`).
@@ -717,6 +737,58 @@ impl<'a, 'o> Lexer<'a, 'o> {
                 self.bump();
             }
         }
+    }
+
+    /// An identifier-continuation char in Phel's char-literal boundary guard:
+    /// the negative-lookahead set `[A-Za-z0-9_\-\\]` from its `Lexer.php`.
+    fn is_char_ident_cont(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '\\'
+    }
+
+    /// Phel's boundary guard ([`CharSyntax::BackslashFqn`]). The cursor is at a
+    /// `\`; decide whether it opens a character literal (`true`) or is the first
+    /// char of a PHP fully-qualified name like `\Phel\Lang\Symbol`, which reads
+    /// as an ordinary symbol (`false`). Mirrors Phel's char rule: a char is a
+    /// named char / `\uHHHH` / `\oOOO` / any single non-whitespace char, in each
+    /// case *not* immediately followed by an identifier continuation
+    /// `[A-Za-z0-9_\-\\]` (the alternatives are tried longest-first, with the
+    /// single-char form as the fallback, exactly as the regex backtracks).
+    fn backslash_opens_char(&self) -> bool {
+        let body = &self.rest()['\\'.len_utf8()..]; // input past the backslash
+        let boundary = |after: &str| !after.chars().next().is_some_and(Self::is_char_ident_cont);
+        // Named chars.
+        for name in ["space", "newline", "tab", "formfeed", "backspace", "return"] {
+            if let Some(after) = body.strip_prefix(name) {
+                if boundary(after) {
+                    return true;
+                }
+            }
+        }
+        // `\uHHHH` — exactly four hex digits.
+        if let Some(after_u) = body.strip_prefix('u') {
+            if after_u.len() >= 4
+                && after_u.as_bytes()[..4].iter().all(u8::is_ascii_hexdigit)
+                && boundary(&after_u[4..])
+            {
+                return true;
+            }
+        }
+        // `\oO`, `\oOO`, `\oOOO` — one to three octal digits (greedy, backtracking).
+        if let Some(after_o) = body.strip_prefix('o') {
+            let octal = after_o
+                .bytes()
+                .take(3)
+                .take_while(|b| (b'0'..=b'7').contains(b))
+                .count();
+            for len in (1..=octal).rev() {
+                if boundary(&after_o[len..]) {
+                    return true;
+                }
+            }
+        }
+        // Any single non-whitespace char, not followed by an identifier char.
+        let mut chars = body.chars();
+        matches!(chars.next(), Some(c) if !c.is_whitespace()) && boundary(chars.as_str())
     }
 
     /// Lex a character literal from the current position; the backslash lead has

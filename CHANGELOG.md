@@ -9,6 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - `Options.keep_discarded` (`bool`, default `false`) — keep a `#_` / `#;` discarded form in the tree as a `DatumKind::Prefixed` with `Prefix::Discard`, instead of dropping it. Off by default (right for an evaluator or a structural query); a round-trip / formatting consumer sets it (a `mut` field, since `Options` is `#[non_exhaustive]`) so it can still see a discarded form's span and shape — e.g. to reindent inside `#_(…)`. Reported downstream by lisplens.
+- `Options.line_comment_in_atom` (`bool`, default `false`) — whether the line-comment character is an ordinary symbol constituent *inside* a token, so it starts a comment only at a token boundary. Set for **Phel**, whose atom grammar admits `;`.
+- `Options.pipe_anon_fn` (`bool`, default `false`) — whether `|(…)` opens a short anonymous function, Phel's sibling of Clojure's `#(…)`. A `|` immediately before `(` becomes a `HashFn` prefix; a `|` anywhere else stays an ordinary symbol constituent. Set for **Phel**.
+- `CharSyntax::BackslashFqn` — a `\`-lead char syntax that yields to PHP fully-qualified names (Phel). Like `Backslash`, but a `\` opens a char literal only at a genuine char boundary (a named char, `\uHHHH`/`\oOOO`, or a single char not followed by `[A-Za-z0-9_\-\\]`); otherwise the whole `\Foo\Bar` run is one symbol. Set for **Phel**.
+
+### Fixed
+
+- **Phel:** a `;` inside a symbol is no longer mis-read as a line comment. Phel's own lexer accepts `;` in atoms (`foo;bar` is one symbol; the quoted `'*_.%;!:+-?` from Phel's tests reads whole), while `;` at a token boundary is still a comment (`foo ;bar`). Previously the reader cut the symbol at `;` and swallowed the rest of the line, unbalancing the following forms — a faithfulness gap (ADR-0030), reported downstream by lisplens.
+- **Phel:** `|(…)` now reads as one short-anonymous-function form (a `HashFn` prefix on the list), matching Phel's `\|\(` lexer token, instead of a stray `|` symbol plus a separate list — which gave `(map |(+ $ 1) xs)` four children instead of three and broke any symbol-accurate (rename/refs/extract) pass. `#(…)` keeps working; a `|` outside `|(` stays an ordinary symbol constituent. Faithfulness gap (ADR-0030), reported downstream by lisplens.
+- **Phel:** PHP fully-qualified names (`\RuntimeException`, `\Phel\Lang\Symbol`, `(php/new \RuntimeException)`) now read as single symbols instead of `\`-char literals — a single-segment FQN was the wrong datum *kind* (`Char`, not `Symbol`) and a multi-segment one was split into several `Char`s, both breaking symbol-accurate passes. Phel's own char rule guards the same boundary (`\c` is a char only when not followed by `[A-Za-z0-9_\-\\]`); genuine char literals (`\newline`, `\a`) still read. Faithfulness gap (ADR-0030), reported downstream by lisplens.
 
 ## [0.6.0] - 2026-07-03
 
