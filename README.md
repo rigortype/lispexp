@@ -77,6 +77,13 @@ The opt-in [`annotate`](https://docs.rs/lispexp/latest/lispexp/annotate/) module
 
 Every spec carries a confidence/provenance, and the whole layer is best-effort and reader-only: it tags what it can confidently recognize — never expanding a macro or fabricating structure — and leaves the rest alone.
 
+## Used by
+
+lispexp is the reader underneath higher-level Lisp tooling — the substrate role above, in the wild:
+
+- **[cccc][]** — a language-agnostic Cognitive/Cyclomatic Complexity measurement tool. lispexp powers its Lisp-family adapters (Common Lisp, Emacs Lisp, Scheme, Racket, Clojure), lowering the parsed tree into the tool's shared complexity IR so one binary measures mixed-language codebases without a bespoke reader per dialect.
+- **[lisplens][]** — a parse-safe refactoring CLI / MCP server for reading and editing Lisp source across dialects. It builds on the lispexp reader for structural, definition-anchored edits (rename, inline, extract) that validate syntax before writing.
+
 ## Documentation
 
 The full API reference is on docs.rs: <https://docs.rs/lispexp/latest/lispexp/>. Runnable examples live in [`examples/`](examples/) — e.g. `cargo run --example find_definitions` (annotate definitions), `--example walk_code_nodes` (walk only code, skipping quoted data), `--example harvest_project_macros` (teach the annotator a project's own def-macros), `--example dialect_by_extension`, and `--example lex_tokens` (the trivia-keeping token layer). The design is recorded in [`docs/design.md`](docs/design.md), the domain vocabulary in [`CONTEXT.md`](CONTEXT.md), and the decisions behind it in the ADRs under [`docs/adr/`](docs/adr/).
@@ -118,3 +125,5 @@ limitations under the License.
 [AutoLISP]: https://help.autodesk.com/view/OARXMAC/2022/ENU/?guid=GUID-16DC15FC-5329-492E-B66A-401D49CF971F
 [Janet]: https://janet-lang.org/
 [EDN]: https://github.com/edn-format/edn
+[cccc]: https://github.com/moznion/cccc
+[lisplens]: https://github.com/rigortype/lisplens
