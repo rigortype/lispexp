@@ -6,18 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-04
+
+Phel reader faithfulness, plus an opt-in for round-trip consumers. Three Phel constructs that produced a structurally-wrong tree — a `;` inside a symbol, the `|(…)` short anonymous function, and PHP fully-qualified names — now read the way Phel's own lexer reads them. Validated against the phel-lang source: it goes from 2 structural parse errors to 0, with 648 PHP FQNs and 7 `|(…)` forms now correctly structured. This release also seeds real-code corpus tests for every previously thin-tested dialect (Phel, ISLisp, AutoLISP, Janet, Fennel, Hy, LFE) — an internal quality gate, no API change.
+
 ### Added
 
-- `Options.keep_discarded` (`bool`, default `false`) — keep a `#_` / `#;` discarded form in the tree as a `DatumKind::Prefixed` with `Prefix::Discard`, instead of dropping it. Off by default (right for an evaluator or a structural query); a round-trip / formatting consumer sets it (a `mut` field, since `Options` is `#[non_exhaustive]`) so it can still see a discarded form's span and shape — e.g. to reindent inside `#_(…)`. Reported downstream by lisplens.
-- `Options.line_comment_in_atom` (`bool`, default `false`) — whether the line-comment character is an ordinary symbol constituent *inside* a token, so it starts a comment only at a token boundary. Set for **Phel**, whose atom grammar admits `;`.
-- `Options.pipe_anon_fn` (`bool`, default `false`) — whether `|(…)` opens a short anonymous function, Phel's sibling of Clojure's `#(…)`. A `|` immediately before `(` becomes a `HashFn` prefix; a `|` anywhere else stays an ordinary symbol constituent. Set for **Phel**.
-- `CharSyntax::BackslashFqn` — a `\`-lead char syntax that yields to PHP fully-qualified names (Phel). Like `Backslash`, but a `\` opens a char literal only at a genuine char boundary (a named char, `\uHHHH`/`\oOOO`, or a single char not followed by `[A-Za-z0-9_\-\\]`); otherwise the whole `\Foo\Bar` run is one symbol. Set for **Phel**.
+- `Options.keep_discarded` (`bool`, default `false`) — keep a `#_` / `#;` discarded form in the tree (as a `DatumKind::Prefixed` with `Prefix::Discard`) instead of dropping it, so a round-trip / formatting consumer can still see its span and shape.
+  - Off by default, which stays right for an evaluator or a structural query; a formatter that reindents inside `#_(…)` opts in. `Options` is `#[non_exhaustive]`, so set it by mutating the field.
+- `Options.line_comment_in_atom`, `Options.pipe_anon_fn`, and `CharSyntax::BackslashFqn` — the per-dialect knobs behind the Phel fixes below, each off by default and set only for Phel, so a caller assembling custom `Options` can opt into the same behavior.
 
 ### Fixed
 
-- **Phel:** a `;` inside a symbol is no longer mis-read as a line comment. Phel's own lexer accepts `;` in atoms (`foo;bar` is one symbol; the quoted `'*_.%;!:+-?` from Phel's tests reads whole), while `;` at a token boundary is still a comment (`foo ;bar`). Previously the reader cut the symbol at `;` and swallowed the rest of the line, unbalancing the following forms — a faithfulness gap (ADR-0030), reported downstream by lisplens.
-- **Phel:** `|(…)` now reads as one short-anonymous-function form (a `HashFn` prefix on the list), matching Phel's `\|\(` lexer token, instead of a stray `|` symbol plus a separate list — which gave `(map |(+ $ 1) xs)` four children instead of three and broke any symbol-accurate (rename/refs/extract) pass. `#(…)` keeps working; a `|` outside `|(` stays an ordinary symbol constituent. Faithfulness gap (ADR-0030), reported downstream by lisplens.
-- **Phel:** PHP fully-qualified names (`\RuntimeException`, `\Phel\Lang\Symbol`, `(php/new \RuntimeException)`) now read as single symbols instead of `\`-char literals — a single-segment FQN was the wrong datum *kind* (`Char`, not `Symbol`) and a multi-segment one was split into several `Char`s, both breaking symbol-accurate passes. Phel's own char rule guards the same boundary (`\c` is a char only when not followed by `[A-Za-z0-9_\-\\]`); genuine char literals (`\newline`, `\a`) still read. Faithfulness gap (ADR-0030), reported downstream by lisplens.
+- **Phel:** a `;` inside a symbol is no longer mis-read as a line comment — `foo;bar` is one symbol and the quoted `'*_.%;!:+-?` reads whole, while a `;` at a token boundary is still a comment (`foo ;bar`). Previously the reader cut the symbol at the `;` and swallowed the rest of the line, unbalancing every following form.
+- **Phel:** `|(…)` now reads as one short-anonymous-function form (the `HashFn` prefix, like Clojure's `#(…)`) instead of a stray `|` symbol plus a separate list, so a form's argument count is correct for symbol-accurate passes such as rename/refs/extract. `#(…)` keeps working, and a `|` outside `|(` stays an ordinary symbol constituent.
+- **Phel:** PHP fully-qualified names (`\RuntimeException`, `\Phel\Lang\Symbol`, `(php/new \RuntimeException)`) now read as single symbols instead of `\`-char literals, fixing both the datum kind and, for multi-segment names, the child count. Genuine char literals (`\newline`, `\a`) still read.
 
 ## [0.6.0] - 2026-07-03
 
@@ -147,7 +150,8 @@ Initial release: a pure-Rust, reader-only lexer and parser for S-expression synt
 - `lispexp::annotate`: a definition-form annotator that tags a form's parts (name, arglist, docstring, body) using declared metadata and a spec harvester that reads Emacs Lisp def-macros' own arglist parameter names.
 - Continuous parse-conformance corpus tests over real-world code (chibi-scheme, clojure/clojure, cl-ppcre, lem, magit, typed-racket).
 
-[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rigortype/lispexp/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rigortype/lispexp/releases/tag/v0.7.0
 [0.6.0]: https://github.com/rigortype/lispexp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rigortype/lispexp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rigortype/lispexp/releases/tag/v0.4.0
