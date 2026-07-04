@@ -34,6 +34,7 @@ Update:
 
 - `Cargo.toml` — the `version` field.
 - `CHANGELOG.md` — seal `[Unreleased]` into the new version section (below).
+- `crates/lispexp-emacs/Cargo.toml` — the companion crate's `lispexp = { path = "../..", version = "X.Y" }` requirement, **but only when the bump crosses the semver-compat boundary** (in 0.x, any minor bump; at/after 1.0, any major bump). See [Keep the companion crate in step](#keep-the-companion-crate-lispexp-emacs-in-step) — skipping it makes the whole workspace stop resolving.
 
 `Cargo.lock` is not tracked for this library, so there is no lockfile to bump.
 
@@ -70,6 +71,52 @@ notes, not commit messages.
   `compare/vx.y.z...HEAD` and add `[x.y.z]:
   https://github.com/rigortype/lispexp/releases/tag/vx.y.z`.
 
+## Keep the companion crate (`lispexp-emacs`) in step
+
+The workspace member `crates/lispexp-emacs` depends on this crate by **path and
+version** — e.g. `lispexp = { path = "../..", version = "0.7" }`. That `version`
+is a Cargo caret requirement (`^0.7` = `>=0.7.0, <0.8.0`): it pins a
+*compatibility range*, not just a floor. Two consequences follow, and both are
+easy to miss because the core release looks self-contained.
+
+### 1. Build coupling — bump the requirement, or the workspace stops resolving (always)
+
+When the new lispexp version leaves the companion's current caret range, `cargo`
+can no longer select the local crate and **every workspace command fails**
+(`cargo test`/`clippy`/`doc`, hence the whole verify gate):
+
+```
+error: failed to select a version for the requirement `lispexp = "^0.7"`
+```
+
+Whether the range breaks depends on the version line:
+
+- **0.x (pre-1.0):** every **minor** bump breaks it — `0.7.z → 0.8.0` needs `version = "0.8"`. A **patch** bump (`0.7.0 → 0.7.1`) stays in range, no edit.
+- **≥1.0:** every **major** bump breaks it — `1.4.z → 2.0.0` needs `version = "2"`. Minor/patch stay in range.
+
+Edit `crates/lispexp-emacs/Cargo.toml` to the new range **inside the same
+`Bump up version to x.y.z` commit** — it is part of the version bump, not
+separate cleanup. (The verify gate below will catch a stale requirement, but fix
+it proactively rather than discovering it as a resolver error.)
+
+### 2. Release coupling — a coordinated companion release (when the break reaches its API)
+
+`lispexp-emacs` re-exposes lispexp types in its **public** signatures — e.g.
+`pub fn bundled_table(dialect: lispexp::Dialect) -> lispexp::indent::IndentTable`.
+So when a lispexp release makes a **breaking** change to a type the companion's
+public API touches (`Dialect`, `Options`, `Datum`, `IndentTable`, …), the break
+propagates to the companion's own downstream users, and it needs its **own**
+release — not just the dependency-requirement bump above:
+
+1. Bump `crates/lispexp-emacs/Cargo.toml`'s own `version` (its independent semver).
+2. Seal `crates/lispexp-emacs/CHANGELOG.md` (same rules as the core changelog; note the lispexp version it now requires).
+3. **After the core `vX.Y.Z` is live on crates.io** — the companion's requirement must resolve against the *published* lispexp — push an **`emacs-vX.Y.Z`** tag. That triggers [`release-emacs.yml`](../../../.github/workflows/release-emacs.yml), which publishes `lispexp-emacs` and cuts its own GitHub Release. The two crates version and tag **independently** (`vX.Y.Z` vs `emacs-vX.Y.Z`).
+
+If the lispexp change is **non-breaking** (patch or purely additive) or does not
+touch a type in the companion's public API, only build coupling (1) applies: the
+requirement bump keeps the workspace building and no companion re-release is
+forced (you may still choose to cut one).
+
 ## Verify the release
 
 Run before committing (this is exactly what `ci.yml` enforces, plus the package
@@ -89,6 +136,11 @@ confirm it reports a small file count (the `tests/corpus/` submodules are
 excluded via `Cargo.toml`'s `exclude`). If a check needs formatting or other
 non-version cleanup, commit that separately — do not fold it into the version
 bump.
+
+If any check fails with `failed to select a version for the requirement
+lispexp = "^X.Y"`, the companion crate's dependency requirement was not bumped —
+fix `crates/lispexp-emacs/Cargo.toml` per [Keep the companion crate in
+step](#keep-the-companion-crate-lispexp-emacs-in-step) and re-run.
 
 ## Commit
 
@@ -136,6 +188,7 @@ gh release create vx.y.z --title vx.y.z \
 
 - Working tree starts clean or every pending change is understood.
 - `Cargo.toml` `version` equals the new `x.y.z`.
+- If the bump crossed the semver-compat boundary (0.x minor / ≥1.0 major), `crates/lispexp-emacs/Cargo.toml`'s `lispexp` requirement was bumped to match **in the same commit**, and the workspace resolves; if the break reaches the companion's public API, its own `version` + `CHANGELOG.md` are prepared for a follow-up `emacs-vx.y.z` release (cut after the core is live on crates.io).
 - Every former `[Unreleased]` bullet was classified and, if commit-style,
   rewritten; no bullet in the new section has two sentences, an internal-only
   detail, or a merge artefact. (Confirm by eye — CI cannot.)
