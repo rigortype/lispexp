@@ -367,6 +367,15 @@ pub struct Options {
     pub datum_comment: bool,
     /// Whether `#_` discards the next datum (Clojure/Phel).
     pub discard_underscore: bool,
+    /// Whether a `#_` / `#;` **discarded** form is kept in the tree (as a
+    /// [`Prefixed`](crate::DatumKind::Prefixed) with [`Prefix::Discard`](crate::Prefix::Discard))
+    /// instead of being dropped.
+    /// Default `false` — the reader omits discarded forms, right for an evaluator or
+    /// a structural query. A **round-trip / formatting** consumer wants them kept, so
+    /// it can still see their span and shape (e.g. to reindent inside `#_(…)`).
+    /// This is a caller preference, not a dialect trait, so it stays `false` in every
+    /// dialect preset; set it explicitly (`Options { keep_discarded: true, ..base }`).
+    pub keep_discarded: bool,
     /// Whether `#` introduces reader syntax (`#t`, `#\`, `#(`, ...).
     pub hash_syntax: bool,
     /// Role of `[` `]`.
@@ -476,6 +485,7 @@ impl Options {
             }),
             datum_comment: true,
             discard_underscore: false,
+            keep_discarded: false,
             hash_syntax: true,
             square: DelimRole::List,
             // R7RS reserves `{` `}` for future use; treat as ordinary so the
@@ -521,6 +531,7 @@ impl Options {
             block_comment: None,
             datum_comment: false,
             discard_underscore: true,
+            keep_discarded: false,
             hash_syntax: true,
             square: DelimRole::Vector,
             curly: DelimRole::Map,
@@ -570,6 +581,7 @@ impl Options {
             }),
             datum_comment: false,
             discard_underscore: false,
+            keep_discarded: false,
             hash_syntax: true,
             // `[` `]` `{` `}` are not standard delimiters in CL.
             square: DelimRole::Ordinary,
@@ -618,6 +630,7 @@ impl Options {
             block_comment: None, // `;` line comments only
             datum_comment: false,
             discard_underscore: false,
+            keep_discarded: false,
             hash_syntax: true,
             square: DelimRole::Vector, // `[...]` is a data vector
             curly: DelimRole::Ordinary,
