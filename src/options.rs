@@ -52,6 +52,14 @@ pub enum CharSyntax {
     HashBackslash,
     /// `\a`, `\newline` (Clojure).
     Backslash,
+    /// `\a`, `\newline` **but yielding to PHP fully-qualified names** (Phel).
+    /// Like [`Backslash`](Self::Backslash), except a `\` only opens a character
+    /// literal when the char is a named char (`\space`, …), a `\uHHHH` / `\oOOO`
+    /// escape, or a single char *not* followed by an identifier continuation
+    /// `[A-Za-z0-9_\-\\]`. Otherwise the whole `\Foo\Bar` run is one symbol, so
+    /// `\RuntimeException` and `\Phel\Lang\Symbol` read as FQNs rather than
+    /// char literals. Mirrors Phel's `Lexer.php` char rule.
+    BackslashFqn,
     /// `?a`, `?\n`, `?\C-x` (Emacs Lisp).
     Question,
 }
@@ -813,10 +821,13 @@ impl Options {
         // details drawn from its own `Lexer.php`:
         //   - `;` is an atom constituent (only a comment at a token boundary),
         //     so symbols like `foo;bar` and the quoted `'*_.%;!:+-?` read whole;
-        //   - `|(…)` is a short anonymous function (`#(…)` still works too).
+        //   - `|(…)` is a short anonymous function (`#(…)` still works too);
+        //   - `\` yields to PHP fully-qualified names (`\Phel\Lang\Symbol`),
+        //     reading a char literal only at a genuine char boundary.
         Options {
             line_comment_in_atom: true,
             pipe_anon_fn: true,
+            char_syntax: Some(CharSyntax::BackslashFqn),
             ..Options::clojure()
         }
     }

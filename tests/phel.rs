@@ -123,6 +123,41 @@ fn bare_pipe_is_an_ordinary_symbol() {
 }
 
 #[test]
+fn php_fqn_is_one_symbol_not_char_literals() {
+    // A PHP fully-qualified name is a single symbol, not a `\`-char literal.
+    let data = phel("(php/new \\RuntimeException)");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, DatumKind::Symbol("php/new"));
+    assert_eq!(items[1].kind, DatumKind::Symbol("\\RuntimeException"));
+
+    // A multi-segment FQN stays one symbol too (not three `\`-chars), so the
+    // child count is right for a symbol-accurate pass.
+    let data = phel("(foo \\Phel\\Lang\\Symbol)");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1].kind, DatumKind::Symbol("\\Phel\\Lang\\Symbol"));
+}
+
+#[test]
+fn backslash_char_literals_still_read() {
+    // Genuine char literals still lex: a named char, and a single char at a
+    // boundary. Phel's guard only diverts the FQN case.
+    assert_eq!(phel("\\newline")[0].kind, DatumKind::Char("\\newline"));
+    assert_eq!(phel("\\space")[0].kind, DatumKind::Char("\\space"));
+    let data = phel("[\\a \\+]");
+    let DatumKind::List { items, .. } = &data[0].kind else {
+        panic!()
+    };
+    assert_eq!(items[0].kind, DatumKind::Char("\\a"));
+    assert_eq!(items[1].kind, DatumKind::Char("\\+"));
+}
+
+#[test]
 fn semicolon_at_a_token_boundary_still_comments() {
     // A `;` that begins a token is a line comment, even in Phel.
     let data = phel("(foo ;bar\n baz)");
