@@ -245,6 +245,15 @@ fn lfe_corpus_parses() {
 }
 
 #[test]
+fn clautolisp_corpus_parses() {
+    // clautolisp is a Common Lisp *implementation* of AutoLISP; its own sources
+    // are `.lisp` (excluded here). The `.lsp` files are genuine AutoLISP — the
+    // `autolisp-test`/`autolisp-spec` harness and probes, self-described as
+    // "Pure AutoLISP" — the one dialect that otherwise had only unit tests.
+    check_corpus("clautolisp", &["lsp"], &Options::autolisp(), 100, &[]);
+}
+
+#[test]
 fn eisl_corpus_parses() {
     check_corpus(
         "eisl",

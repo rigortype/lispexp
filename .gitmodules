@@ -37,3 +37,6 @@
 [submodule "tests/corpus/eisl"]
 	path = tests/corpus/eisl
 	url = https://github.com/sasagawa888/eisl
+[submodule "tests/corpus/clautolisp"]
+	path = tests/corpus/clautolisp
+	url = https://github.com/ogamita/clautolisp
