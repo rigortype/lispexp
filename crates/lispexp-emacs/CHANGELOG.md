@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-04
+
+Tracks the `lispexp` 0.7 release. `lispexp` is a public dependency — its types appear in this crate's API — so this is a compatibility bump downstream users need in order to move to `lispexp` 0.7; this crate's own API is unchanged.
+
+### Changed
+
+- **Breaking:** require `lispexp` 0.7 (was 0.6). Because `lispexp` types are re-exposed here (`bundled_table(Dialect) -> IndentTable`, and the `dir_locals` / `local_vars` readers take its `Options` / return its `Datum`), a consumer pinned to `lispexp` 0.6 cannot use this version until they also move to 0.7 — hence the minor (breaking) bump rather than a patch.
+
 ## [0.1.0] - 2026-07-03
 
 Initial release: the Emacs-specific integration companion crate for `lispexp` — the home for Emacs knowledge (data and interpreters) kept out of the neutral reader core (ADR-0033). Emacs is the de-facto foundation for Lisp tooling, so this crate bundles what a Lisp formatter / linter / LSP otherwise re-derives. Everything here is **read & interpret, never execute**: it resolves structure and returns verbatim values, and never runs elisp.
