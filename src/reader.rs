@@ -795,9 +795,10 @@ fn looks_like_number(s: &str) -> bool {
 ///
 /// The WAT grammar is disjoint enough from the Lisp one to need its own shape
 /// check: optional `_` digit separators, `0x` hexadecimal integers and floats,
-/// binary `p` exponents on hex floats (`0x1.8p3`), decimal `e` exponents, and
-/// the float constants `inf` / `nan` / `nan:0x…`. Value is never interpreted —
-/// this is still lexical-shape-only, so range checks stay with the consumer.
+/// optional `.` fractions and `p` exponents on hex floats (`0x1.8`, `0x1.8p3`),
+/// decimal `e` exponents, and the float constants `inf` / `nan` / `nan:0x…`.
+/// Value is never interpreted — this is still lexical-shape-only, so range
+/// checks stay with the consumer.
 fn wat_looks_like_number(s: &str) -> bool {
     let b = s.as_bytes();
     let mut i = 0;
@@ -815,9 +816,11 @@ fn wat_looks_like_number(s: &str) -> bool {
 
     // Integer or float: decimal (`num`, `.`, `e`/`E` exponent) or `0x`
     // hexadecimal (`hexnum`, `.`, `p`/`P` exponent). In both bases the exponent
-    // itself is a decimal `num` (`hexfloat` in the WebAssembly spec allows an
-    // optional `.` fraction and an optional `p`/`P` exponent, mirroring
-    // `float`).
+    // itself is a decimal `num`. The reference interpreter's `float` grammar
+    // (and wabt) accepts a hex fraction without a `p` exponent (`0x1.8`), just
+    // as a decimal `float` can omit `e`; the current spectec `Thexfloat`
+    // production writes the exponent as mandatory, so we follow the reference
+    // implementations rather than that source.
     let (digits, hex, exp_lo, exp_hi) = if let Some(hex) = body.strip_prefix(b"0x") {
         (hex, true, b'p', b'P')
     } else {
