@@ -816,11 +816,12 @@ fn wat_looks_like_number(s: &str) -> bool {
 
     // Integer or float: decimal (`num`, `.`, `e`/`E` exponent) or `0x`
     // hexadecimal (`hexnum`, `.`, `p`/`P` exponent). In both bases the exponent
-    // itself is a decimal `num`. The reference interpreter's `float` grammar
-    // (and wabt) accepts a hex fraction without a `p` exponent (`0x1.8`), just
-    // as a decimal `float` can omit `e`; the current spectec `Thexfloat`
-    // production writes the exponent as mandatory, so we follow the reference
-    // implementations rather than that source.
+    // itself is a decimal `num`. The published W3C text-format specification
+    // and the reference interpreter (`lexer.mll`, `interpreter/README.md`)
+    // accept a hex fraction without a `p` exponent (`0x1.8`), just as a decimal
+    // `float` can omit `e`; the current spectec `Thexfloat` production writes
+    // the exponent as mandatory, so we follow the reference grammar rather than
+    // that draft source.
     let (digits, hex, exp_lo, exp_hi) = if let Some(hex) = body.strip_prefix(b"0x") {
         (hex, true, b'p', b'P')
     } else {

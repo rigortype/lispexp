@@ -406,8 +406,9 @@ pub struct Options {
     pub line_comment_in_atom: bool,
     /// Whether a line comment starts only when [`line_comment`](Self::line_comment)
     /// appears *twice* at a token boundary (WAT `;;`). A lone copy of the
-    /// character is then an ordinary atom (WAT reserved `;foo`), not a comment
-    /// that would swallow the rest of the line — including a same-line `)`.
+    /// character is then an ordinary atom (`;foo`), terminating a preceding
+    /// atom (`foo;bar` → `foo` then `;bar`) rather than starting a comment that
+    /// would swallow the rest of the line — including a same-line `)`.
     /// Default `false`; set only by [`Options::wat`].
     pub line_comment_double: bool,
     /// Whether a lone `\r` terminates a line for *tokenization* (WAT's
@@ -1013,8 +1014,10 @@ impl Options {
     ///
     /// - `'`, `` ` ``, `#`, `|`, and `\` are WAT identifier characters, not
     ///   reader-macro glyphs (`$a'b`, `$a#b`, `$a|b` are one identifier each).
-    ///   `,` is *not* an idchar (and not unquote); a stray comma glues onto the
-    ///   adjacent atom as a reserved token (ADR-0030).
+    ///   `,` and `;` are *not* idchars (nor unquote / a single-`;` comment):
+    ///   a stray `,` glues onto the adjacent atom as a reserved token, while a
+    ///   lone `;` terminates a preceding atom and starts a `;…` atom so it
+    ///   never swallows a following `)` (ADR-0030).
     /// - `;;` line comments — a lone `;` is an atom, not a comment — and
     ///   nestable `(; … ;)` block comments. See [`Self::line_comment_double`]
     ///   and [`Self::cr_newline`] (WAT's newline set is LF, CR, CRLF).

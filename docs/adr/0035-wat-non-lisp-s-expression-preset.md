@@ -16,10 +16,10 @@ fits it. But WAT shares almost none of the Lisp *reader surface*:
 - Its own number grammar: decimal and `0x` hexadecimal integers with optional `_`
   separators, decimal floats with `e` exponents, hex floats with optional `.`
   fractions and `p` exponents (`0x1.8`, `0x1.8p3`), and `inf` / `nan` / `nan:0x…`.
-  The reference interpreter and wabt accept a `p`-less hex fraction even though
-  the current spectec `Thexfloat` production writes the exponent as mandatory;
-  lispexp follows the reference implementations (and the interpreter README this
-  request cited).
+  The published W3C text-format specification and the reference interpreter
+  (`lexer.mll`, `interpreter/README.md`) accept a `p`-less hex fraction even
+  though the current spectec `Thexfloat` production writes the exponent as
+  mandatory; lispexp follows the reference grammar.
 - `$"name with spaces"` (quoted identifiers) is one token, which the generic atom
   scanner would split at the `"`.
 - Its own comments: `;;` line comments and nestable `(; … ;)` block comments. The

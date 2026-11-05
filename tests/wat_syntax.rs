@@ -42,6 +42,19 @@ fn cr_only_newlines() {
     assert_clean("cr line comment", "(module\r;; comment\r(func))");
     assert_clean("crlf line comment", "(module\r\n;; comment\r\n(func))");
     assert_clean("cr at eof", ";; comment\r");
+
+    // Line *numbering* still follows ADR-0024 (`\n` and `\r\n` only; a lone CR
+    // is not a line break), so a CR-only file parses structurally while every
+    // datum reports line 1 (ADR-0035).
+    let cr_only = parse("(module\r;; comment\r(func))", &wat());
+    let cr_items = cr_only.data[0].items().unwrap();
+    assert_eq!(cr_only.data[0].line, 1);
+    assert_eq!(cr_items[1].head_symbol(), Some("func"));
+    assert_eq!(cr_items[1].line, 1);
+
+    // By contrast, CRLF increments line numbers as usual.
+    let crlf = parse("(module\r\n;; comment\r\n(func))", &wat());
+    assert_eq!(crlf.data[0].items().unwrap()[1].line, 3);
 }
 
 #[test]

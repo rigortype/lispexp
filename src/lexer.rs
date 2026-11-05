@@ -126,9 +126,7 @@ impl<'a, 'o> Lexer<'a, 'o> {
                 true
             };
             if starts {
-                while matches!(self.peek(), Some(c) if !self.is_line_break(c)) {
-                    self.bump();
-                }
+                self.consume_line_rest();
                 return Some(self.token(TokenKind::LineComment, start));
             }
         }
@@ -184,7 +182,7 @@ impl<'a, 'o> Lexer<'a, 'o> {
 
         // WAT quoted identifier `$"name with spaces"` — one verbatim Atom
         // including the `$` and the quotes (ADR-0035).
-        if c == '$' && self.opts.quoted_identifiers && self.rest().starts_with("$\"") {
+        if self.opts.quoted_identifiers && self.rest().starts_with("$\"") {
             return Some(self.lex_quoted_identifier(start));
         }
 
@@ -408,22 +406,31 @@ impl<'a, 'o> Lexer<'a, 'o> {
     }
 
     fn lex_string(&mut self, start: usize) -> Token {
-        let content_start = start + 1;
         self.bump(); // opening quote
+        self.finish_quoted(start, TokenKind::Str, UnterminatedKind::Str)
+    }
+
+    /// Consume past an already-bumped opening `"` up to the matching unescaped
+    /// `"`, emitting `closed`. On EOF, backtrack to just before the first
+    /// line-start `(` after the opening quote — overwhelmingly the next
+    /// top-level form, not string content — so the reader can resync (R5), and
+    /// emit [`TokenKind::Unterminated`]`(unterminated)`. A legitimately
+    /// terminated form (even a multiline one holding a line-start `(`) never
+    /// reaches the backtrack, so it only affects the error path.
+    fn finish_quoted(
+        &mut self,
+        start: usize,
+        closed: TokenKind,
+        unterminated: UnterminatedKind,
+    ) -> Token {
+        let content_start = self.pos;
         if self.consume_until_unescaped('"') {
-            return self.token(TokenKind::Str, start);
+            return self.token(closed, start);
         }
-        // Unterminated: the scan ran to EOF as one Unterminated token, which
-        // would swallow the rest of the file so the reader can never resync (R5).
-        // Backtrack to just before the first line-start `(` after the opening
-        // quote — overwhelmingly the next top-level form, not string content.
-        // A legitimately terminated string (even a multiline one holding a
-        // line-start `(`) never reaches here, so this only affects the error
-        // path.
         if let Some(cut) = next_line_start_paren(&self.src[content_start..], self.opts.cr_newline) {
             self.pos = content_start + cut;
         }
-        self.token(TokenKind::Unterminated(UnterminatedKind::Str), start)
+        self.token(TokenKind::Unterminated(unterminated), start)
     }
 
     /// Consume characters up to and including the next unescaped `close`, from
@@ -462,44 +469,37 @@ impl<'a, 'o> Lexer<'a, 'o> {
     /// [`UnterminatedKind::QuotedIdentifier`] and backtracks to the likely next
     /// top-level form, like [`Self::lex_string`].
     fn lex_quoted_identifier(&mut self, start: usize) -> Token {
-        let content_start = start + 2; // past `$` and the opening quote
         self.bump(); // '$'
         self.bump(); // '"'
-        if self.consume_until_unescaped('"') {
-            return self.token(TokenKind::Atom, start);
-        }
-        if let Some(cut) = next_line_start_paren(&self.src[content_start..], self.opts.cr_newline) {
-            self.pos = content_start + cut;
-        }
-        self.token(
-            TokenKind::Unterminated(UnterminatedKind::QuotedIdentifier),
-            start,
-        )
+        self.finish_quoted(start, TokenKind::Atom, UnterminatedKind::QuotedIdentifier)
     }
 
-    fn is_line_break(&self, c: char) -> bool {
-        c == '\n' || (self.opts.cr_newline && c == '\r')
+    /// Consume up to the next line break or EOF.
+    fn consume_line_rest(&mut self) {
+        let cr_newline = self.opts.cr_newline;
+        while let Some(&b) = self.src.as_bytes().get(self.pos) {
+            if is_line_break_byte(b, cr_newline) {
+                break;
+            }
+            self.bump();
+        }
     }
 
     fn at_line_start(&self) -> bool {
-        self.pos == 0
-            || self.src[..self.pos].ends_with('\n')
-            || (self.opts.cr_newline && self.src[..self.pos].ends_with('\r'))
+        self.src.as_bytes()[..self.pos]
+            .last()
+            .map_or(true, |&b| is_line_break_byte(b, self.opts.cr_newline))
     }
 
     fn lex_hash(&mut self, start: usize) -> Token {
         // Line-leading `#lang <name>` directive (Racket) and `#!` shebang.
         if self.at_line_start() {
             if self.opts.lang_line && self.rest().starts_with("#lang") {
-                while matches!(self.peek(), Some(c) if !self.is_line_break(c)) {
-                    self.bump();
-                }
+                self.consume_line_rest();
                 return self.token(TokenKind::LangLine, start);
             }
             if self.opts.shebang_line && self.rest().starts_with("#!") {
-                while matches!(self.peek(), Some(c) if !self.is_line_break(c)) {
-                    self.bump();
-                }
+                self.consume_line_rest();
                 return self.token(TokenKind::LineComment, start);
             }
         }
@@ -953,6 +953,12 @@ impl<'a, 'o> Iterator for Lexer<'a, 'o> {
     }
 }
 
+/// Whether `b` is a tokenization line break (`\n`, or `\r` when `cr_newline` is
+/// enabled for WAT).
+const fn is_line_break_byte(b: u8, cr_newline: bool) -> bool {
+    b == b'\n' || (cr_newline && b == b'\r')
+}
+
 /// In `s` (the content just past an unterminated string's opening quote), find
 /// the byte offset of the first line-start `(` — the `(` that is the first
 /// non-whitespace character of a line after a line break. A break is `\n`, or
@@ -963,8 +969,7 @@ fn next_line_start_paren(s: &str, cr_newline: bool) -> Option<usize> {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        let is_break = bytes[i] == b'\n' || (cr_newline && bytes[i] == b'\r');
-        if is_break {
+        if is_line_break_byte(bytes[i], cr_newline) {
             // Step past a CRLF pair once, then skip leading whitespace on the
             // next line (stopping at the next break so a blank line is not a
             // match).
@@ -973,8 +978,7 @@ fn next_line_start_paren(s: &str, cr_newline: bool) -> Option<usize> {
                 j += 1;
             }
             while j < bytes.len()
-                && bytes[j] != b'\n'
-                && !(cr_newline && bytes[j] == b'\r')
+                && !is_line_break_byte(bytes[j], cr_newline)
                 && bytes[j].is_ascii_whitespace()
             {
                 j += 1;
