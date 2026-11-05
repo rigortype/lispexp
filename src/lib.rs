@@ -1,5 +1,7 @@
 //! lispexp — a pure-Rust reader (lexer + parser) for S-expression syntax across
-//! many Lisp dialects.
+//! many Lisp dialects, plus the non-Lisp WebAssembly text format ([WAT]).
+//!
+//! [WAT]: https://webassembly.github.io/spec/core/text/index.html
 //!
 //! The crate is deliberately **reader-only**: it does not evaluate, expand
 //! macros, or interpret the numeric tower. It reads source text into data — the
@@ -38,6 +40,7 @@
 //!     Some("clj" | "cljs" | "cljc" | "edn") => Options::clojure(),
 //!     Some("scm" | "ss") => Options::scheme_superset(),
 //!     Some("el") => Options::emacs_lisp(),
+//!     Some("wat" | "wast") => Options::wat(),
 //!     _ => Options::for_dialect(Dialect::Scheme),
 //! };
 //! # let _ = options;

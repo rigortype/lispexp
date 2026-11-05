@@ -4,7 +4,8 @@
 //! the Lexer and Reader share (ADR-0003). A [`Dialect`] is just a named preset
 //! constructor. Scheme, Clojure, Common Lisp, Emacs Lisp, Racket, Janet, Hy,
 //! AutoLISP, Guile, Phel, Fennel, LFE, and ISLisp are all implemented, plus a
-//! tolerant [`Options::scheme_superset`] for arbitrary `.scm` files.
+//! tolerant [`Options::scheme_superset`] for arbitrary `.scm` files, and
+//! [`Options::wat`] for the non-Lisp WebAssembly text format (ADR-0035).
 
 use crate::datum::Prefix;
 
@@ -241,6 +242,16 @@ pub enum Dialect {
     Fennel,
     /// LFE (Lisp Flavoured Erlang) — a Lisp on the Erlang VM (BEAM).
     Lfe,
+
+    // --- Non-Lisp S-expression formats ---
+    /// WAT (WebAssembly text format) — the S-expression syntax of WebAssembly.
+    /// Not a Lisp: it has no quote family, keywords, character literals, or
+    /// booleans, and its number grammar differs (hex integers, `_` separators,
+    /// `inf`/`nan`/`nan:0x…`, `p`-exponent hex floats). The reader records the
+    /// module/instruction tree faithfully as ordinary lists; validating the
+    /// module or resolving indices is a semantic layer above the reader
+    /// (ADR-0030, ADR-0035). See [`Options::wat`].
+    Wat,
 }
 
 impl Dialect {
@@ -273,6 +284,8 @@ impl Dialect {
         Dialect::Hy,
         Dialect::Fennel,
         Dialect::Lfe,
+        // Non-Lisp S-expression formats
+        Dialect::Wat,
     ];
 
     /// The preset [`Options`] for this dialect — sugar for
@@ -306,6 +319,7 @@ impl std::fmt::Display for Dialect {
             Dialect::Hy => "hy",
             Dialect::Fennel => "fennel",
             Dialect::Lfe => "lfe",
+            Dialect::Wat => "wat",
         };
         f.write_str(name)
     }
@@ -390,6 +404,21 @@ pub struct Options {
     /// symbol; `foo ;bar` is a symbol and a comment); every other dialect terminates
     /// a symbol at the comment character. Default `false`.
     pub line_comment_in_atom: bool,
+    /// Whether a line comment starts only when [`line_comment`](Self::line_comment)
+    /// appears *twice* at a token boundary (WAT `;;`). A lone copy of the
+    /// character is then an ordinary atom (`;foo`), terminating a preceding
+    /// atom (`foo;bar` → `foo` then `;bar`) rather than starting a comment that
+    /// would swallow the rest of the line — including a same-line `)`.
+    /// Default `false`; set only by [`Options::wat`].
+    pub line_comment_double: bool,
+    /// Whether a lone `\r` terminates a line for *tokenization* (WAT's
+    /// `newline` is `\n`, `\r`, or `\r\n`): a line comment ends at `\r`, and
+    /// unterminated-string recovery treats a `\r`-introduced line like a
+    /// `\n`-introduced one. Line *numbering* still follows ADR-0024 (`\n` and
+    /// `\r\n` only; a lone `\r` is not a break), so this flag is about lexical
+    /// structure, not [`LineIndex`](crate::LineIndex). Default `false`; set only
+    /// by [`Options::wat`].
+    pub cr_newline: bool,
     /// Whether `|(…)` opens a short anonymous function — Phel's (deprecated but
     /// still-read) sibling of Clojure's `#(…)`. When set, a `|` *immediately*
     /// before `(` is a [`HashFn`](crate::Prefix::HashFn) prefix (the `(` then
@@ -490,6 +519,20 @@ pub struct Options {
     /// (R4); the reader keeps every datum either way. Only meaningful when
     /// [`Self::dotted_pairs`] is set.
     pub dotted_pairs_infix: bool,
+    /// Whether atoms are classified as [`Number`](crate::DatumKind::Number) by
+    /// the WebAssembly text (WAT) numeric grammar instead of the Lisp one
+    /// (ADR-0035): decimal and `0x` hexadecimal integers with optional `_`
+    /// separators, decimal floats with an `e` exponent, hex floats with a `p`
+    /// exponent (`0x1.8p3`), and `inf` / `nan` / `nan:0x…`. Set only by
+    /// [`Options::wat`]; every Lisp preset leaves it `false`, since spellings
+    /// like `1_000` or `inf` are ordinary symbols there. The value is never
+    /// interpreted — classification remains lexical-shape-only.
+    pub wat_numbers: bool,
+    /// Whether a `$` immediately followed by a string (`$"name with space"`) is
+    /// one verbatim identifier token rather than a `$` atom plus a separate
+    /// string (WAT's quoted-identifier form). Set only by [`Options::wat`].
+    /// Default `false`.
+    pub quoted_identifiers: bool,
 }
 
 impl Options {
@@ -510,6 +553,8 @@ impl Options {
             discard_underscore: false,
             keep_discarded: false,
             line_comment_in_atom: false,
+            line_comment_double: false,
+            cr_newline: false,
             pipe_anon_fn: false,
             hash_syntax: true,
             square: DelimRole::List,
@@ -544,6 +589,8 @@ impl Options {
             fold_case_insensitive: false,
             hash_curly_symbol: false,
             dotted_pairs_infix: false,
+            wat_numbers: false,
+            quoted_identifiers: false,
         }
     }
 
@@ -558,6 +605,8 @@ impl Options {
             discard_underscore: true,
             keep_discarded: false,
             line_comment_in_atom: false,
+            line_comment_double: false,
+            cr_newline: false,
             pipe_anon_fn: false,
             hash_syntax: true,
             square: DelimRole::Vector,
@@ -592,6 +641,8 @@ impl Options {
             fold_case_insensitive: false,
             hash_curly_symbol: false,
             dotted_pairs_infix: false,
+            wat_numbers: false,
+            quoted_identifiers: false,
         }
     }
 
@@ -610,6 +661,8 @@ impl Options {
             discard_underscore: false,
             keep_discarded: false,
             line_comment_in_atom: false,
+            line_comment_double: false,
+            cr_newline: false,
             pipe_anon_fn: false,
             hash_syntax: true,
             // `[` `]` `{` `}` are not standard delimiters in CL.
@@ -644,6 +697,8 @@ impl Options {
             fold_case_insensitive: true,
             hash_curly_symbol: false,
             dotted_pairs_infix: false,
+            wat_numbers: false,
+            quoted_identifiers: false,
         }
     }
 
@@ -661,6 +716,8 @@ impl Options {
             discard_underscore: false,
             keep_discarded: false,
             line_comment_in_atom: false,
+            line_comment_double: false,
+            cr_newline: false,
             pipe_anon_fn: false,
             hash_syntax: true,
             square: DelimRole::Vector, // `[...]` is a data vector
@@ -694,6 +751,8 @@ impl Options {
             fold_case_insensitive: false,
             hash_curly_symbol: false,
             dotted_pairs_infix: false,
+            wat_numbers: false,
+            quoted_identifiers: false,
         }
     }
 
@@ -946,6 +1005,100 @@ impl Options {
         }
     }
 
+    /// WAT (WebAssembly text format) — a non-Lisp S-expression format
+    /// (ADR-0035).
+    ///
+    /// WAT shares only the surface shape of Lisp: parenthesized lists and
+    /// atoms. Every Lisp-specific reader construct is turned off, and WAT's
+    /// own lexical rules are enabled:
+    ///
+    /// - `'`, `` ` ``, `#`, `|`, and `\` are WAT identifier characters, not
+    ///   reader-macro glyphs (`$a'b`, `$a#b`, `$a|b` are one identifier each).
+    ///   `,` and `;` are *not* idchars (nor unquote / a single-`;` comment):
+    ///   a stray `,` glues onto the adjacent atom as a reserved token, while a
+    ///   lone `;` terminates a preceding atom and starts a `;…` atom so it
+    ///   never swallows a following `)` (ADR-0030).
+    /// - `;;` line comments — a lone `;` is an atom, not a comment — and
+    ///   nestable `(; … ;)` block comments. See [`Self::line_comment_double`]
+    ///   and [`Self::cr_newline`] (WAT's newline set is LF, CR, CRLF).
+    /// - `(@id …)` annotations are kept as ordinary lists (the tree looks like
+    ///   the source); they are not dropped as whitespace.
+    /// - Atoms are classified as [`Number`](crate::DatumKind::Number) by WAT's
+    ///   grammar (`0x2A`, `1_000`, `1.5`, `1e10`, `0x1.8p3`, `inf`,
+    ///   `nan:0x400000`); see [`Self::wat_numbers`].
+    /// - `$"name with spaces"` is one identifier token; see
+    ///   [`Self::quoted_identifiers`].
+    ///
+    /// No Lisp semantics are implied: a WAT `(module …)` is an ordinary list
+    /// whose head is the symbol `module`, instructions are just symbols in
+    /// folded or linear position, and module validation/index resolution stays
+    /// with the consumer (ADR-0001, ADR-0030). `[]`/`{}` are ordinary symbol
+    /// characters, so a malformed form never loses sync on them.
+    #[must_use]
+    pub fn wat() -> Self {
+        Options {
+            line_comment: ';',
+            comma_is_whitespace: false,
+            // WAT block comments use `(;` … `;)` and nest. The block-comment
+            // check runs before the `(` delimiter, so `(;` is never a list.
+            block_comment: Some(BlockComment {
+                open: "(;",
+                close: ";)",
+                nestable: true,
+            }),
+            datum_comment: false,
+            discard_underscore: false,
+            keep_discarded: false,
+            line_comment_in_atom: false,
+            line_comment_double: true, // WAT line comments are `;;`, not `;`
+            cr_newline: true,          // WAT's newline is LF, CR, or CRLF
+            pipe_anon_fn: false,
+            hash_syntax: false, // `#` is an idchar
+            square: DelimRole::Ordinary,
+            curly: DelimRole::Ordinary,
+            set_literal: false,
+            regex_literal: false,
+            tagged_literals: false,
+            hash_apostrophe: None,
+            reader_conditional: false,
+            feature_conditional: false,
+            read_eval: false,
+            symbol_escape: false, // `\` is an idchar
+            booleans: false,
+            char_syntax: None,
+            hash_paren: HashParen::None,
+            keyword_colon: false,
+            piped_symbols: false, // `|` is an idchar
+            datum_labels: false,
+            dotted_pairs: false, // `.` is an idchar; a lone dot is an atom
+            hash_keyword: false,
+            lang_line: false,
+            shebang_line: false,
+            roles: CharRoles {
+                quote: None,
+                quasiquote: None,
+                unquote: None,
+                splicing_suffix: '@', // unused while unquote is None
+                deref: None,
+                meta: None,
+                splice: None,
+                mutable: None,
+                short_fn: None,
+            },
+            long_string_backtick: false,
+            hash_bracket: HashBracket::None,
+            regex_slash: false,
+            bytevector_vu8: false,
+            keyword_trailing_colon: false,
+            fold_longhand: false,
+            fold_case_insensitive: false,
+            hash_curly_symbol: false,
+            dotted_pairs_infix: false,
+            wat_numbers: true,
+            quoted_identifiers: true,
+        }
+    }
+
     /// Options for a named [`Dialect`].
     #[must_use]
     pub fn for_dialect(dialect: Dialect) -> Self {
@@ -969,6 +1122,7 @@ impl Options {
             Dialect::Hy => Options::hy(),
             Dialect::Fennel => Options::fennel(),
             Dialect::Lfe => Options::lfe(),
+            Dialect::Wat => Options::wat(),
         }
     }
 }

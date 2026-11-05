@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/rigortype/lispexp)](https://github.com/rigortype/lispexp/blob/master/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rigortype/lispexp)
 
-A pure-Rust **reader** (lexer + parser) for S-expression syntax across many Lisp-family dialects, producing a faithful, position-annotated, code-vs-data-aware parse tree.
+A pure-Rust **reader** (lexer + parser) for S-expression syntax across many Lisp-family dialects, plus the non-Lisp WebAssembly text format (WAT), producing a faithful, position-annotated, code-vs-data-aware parse tree.
 
 📖 **API documentation:** <https://docs.rs/lispexp/latest/lispexp/>
 
@@ -13,7 +13,7 @@ lispexp is deliberately reader-only: it does **not** evaluate, expand macros, or
 
 ## Features
 
-- **One reader, many dialects.** [Scheme][] ([R<sup>7</sup>RS-small][R7RS], [Guile], [Racket], [Gauche], [Mosh], [Gambit]), [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], [Janet], and [EDN] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings.
+- **One reader, many dialects.** [Scheme][] ([R<sup>7</sup>RS-small][R7RS], [Guile], [Racket], [Gauche], [Mosh], [Gambit]), [Common Lisp], [Emacs Lisp], [Clojure], [Hy], [Phel], [Fennel], [LFE (Lisp Flavoured Erlang)][LFE], [ISLisp], [AutoLISP], [Janet], and [EDN] — selected via `Options` presets built from orthogonal, individually-toggleable syntax settings — plus [WAT] (the WebAssembly text format), the one non-Lisp S-expression surface.
 - **Position-annotated.** Every datum carries a byte span and 1-based start line; a `LineIndex` maps offsets to 1-based (line, byte-column).
 - **Code vs. data aware.** Quote/quasiquote/unquote structure is preserved, and a pruning `walk` classifies each node as `Code` or `Data` so consumers descend into code and skip quoted data.
 - **Fault-tolerant.** Malformed input never panics; the reader returns a partial tree plus structured diagnostics, resynchronizing at the next top-level form, with a bounded recursion depth.
@@ -66,6 +66,15 @@ Scheme is a family — R7RS-small plus implementations that extend its reader �
 - **`Options::scheme_superset()` (`Dialect::SchemeSuperset`) — the tolerant `.scm` reader.** The `.scm` extension is shared by [Gauche], Mosh (R6RS), and Gambit, whose reader extensions are *non-conflicting* widenings of R7RS. Because none of them reshapes valid R7RS, a single preset unions them all: `#[…]` char-sets and `#/…/` regexps (opaque `Str` leaves), `#"…"` interpolated strings, `#vu8(…)` bytevectors, and both leading-colon `:foo` and trailing-colon `foo:` keywords. This is why Gauche, unlike Guile and Racket, needs no bespoke preset — its surface already lives in the shared superset. `Dialect::Gauche`, `Dialect::Mosh`, and `Dialect::Gambit` are still selectable by name (including `"gauche"` etc. via `FromStr`) and all resolve to this one reader. On a full Gauche checkout the superset cuts parse errors from 288 (across 40 files) to 3 (one file, a `(exit 0)`-then-trailing-data idiom no full-file reader can model). See [ADR-0027](docs/adr/0027-scheme-superset-tolerant-reader.md).
 
 lispexp never infers a dialect across files or models the numeric tower: pick a preset per input (e.g. by file extension) and read.
+
+### WebAssembly text format (WAT)
+
+WAT shares the S-expression *shape* with Lisp but almost none of its reader surface, so it is modelled as one non-Lisp preset (`Options::wat()` / `Dialect::Wat`, `.wat`/`.wast`) rather than a Lisp dialect ([ADR-0035](docs/adr/0035-wat-non-lisp-s-expression-preset.md)):
+
+- **No Lisp reader syntax.** `'`, `` ` ``, `#`, `|`, and `\` are WAT identifier characters, so `$a'b`, `$x#y`, and `$p|q` are single symbols. Line comments are `;;` (a lone `;` is an atom, not a comment) and end at any WAT newline (LF, CR, or CRLF); block comments are nestable `(; … ;)`; `[]`/`{}` are ordinary characters, never delimiters. `(@id …)` annotations stay in the tree as lists.
+- **WAT numbers.** Hex integers (`0x2A`), `_` separators (`1_000`), decimal and hex floats (`1.5`, `0x1.8p3`), and `inf`/`nan`/`nan:0x…` classify as `Number`; `offset=1024` and `i32.const` stay symbols. Classification is lexical only — ranges and bit widths are the consumer's.
+- **Quoted identifiers.** `$"name with spaces"` reads as one verbatim symbol.
+- **Faithful, not validating.** A module is the list it looks like: `(module …)`, `(func …)`, folded instructions `(i32.add …)`, and linear instructions are all ordinary lists/symbols. Type checking, index resolution, and binary encoding are a semantic layer above the reader (`Options::wat` reads a superset of valid WAT, per ADR-0030).
 
 ### Definition annotation
 
@@ -125,5 +134,6 @@ limitations under the License.
 [AutoLISP]: https://help.autodesk.com/view/OARXMAC/2022/ENU/?guid=GUID-16DC15FC-5329-492E-B66A-401D49CF971F
 [Janet]: https://janet-lang.org/
 [EDN]: https://github.com/edn-format/edn
+[WAT]: https://webassembly.github.io/spec/core/text/index.html
 [cccc]: https://github.com/moznion/cccc
 [lisplens]: https://github.com/rigortype/lisplens

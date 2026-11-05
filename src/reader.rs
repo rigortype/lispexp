@@ -703,6 +703,13 @@ fn classify_atom<'a>(text: &'a str, opts: &Options) -> DatumKind<'a> {
     if opts.keyword_colon && text.starts_with(':') {
         return DatumKind::Keyword(text);
     }
+    if opts.wat_numbers {
+        return if wat_looks_like_number(text) {
+            DatumKind::Number(text)
+        } else {
+            DatumKind::Symbol(text)
+        };
+    }
     if looks_like_number(text) {
         return DatumKind::Number(text);
     }
@@ -781,6 +788,94 @@ fn looks_like_number(s: &str) -> bool {
         prev_exp_marker = is_exp_marker;
     }
     true
+}
+
+/// Whether `s` matches the WebAssembly text (WAT) numeric grammar
+/// (ADR-0035). Used only when [`Options::wat_numbers`] is set.
+///
+/// The WAT grammar is disjoint enough from the Lisp one to need its own shape
+/// check: optional `_` digit separators, `0x` hexadecimal integers and floats,
+/// optional `.` fractions and `p` exponents on hex floats (`0x1.8`, `0x1.8p3`),
+/// decimal `e` exponents, and the float constants `inf` / `nan` / `nan:0x…`.
+/// Value is never interpreted — this is still lexical-shape-only, so range
+/// checks stay with the consumer.
+fn wat_looks_like_number(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+        i += 1;
+    }
+    let body = &b[i..];
+
+    if body == b"inf" || body == b"nan" {
+        return true;
+    }
+    if let Some(payload) = body.strip_prefix(b"nan:0x") {
+        return wat_num_len(payload, true) == Some(payload.len());
+    }
+
+    // Integer or float: decimal (`num`, `.`, `e`/`E` exponent) or `0x`
+    // hexadecimal (`hexnum`, `.`, `p`/`P` exponent). In both bases the exponent
+    // itself is a decimal `num`. The published W3C text-format specification
+    // and the reference interpreter (`lexer.mll`, `interpreter/README.md`)
+    // accept a hex fraction without a `p` exponent (`0x1.8`), just as a decimal
+    // `float` can omit `e`; the current spectec `Thexfloat` production writes
+    // the exponent as mandatory, so we follow the reference grammar rather than
+    // that draft source.
+    let (digits, hex, exp_lo, exp_hi) = if let Some(hex) = body.strip_prefix(b"0x") {
+        (hex, true, b'p', b'P')
+    } else {
+        (body, false, b'e', b'E')
+    };
+    let Some(mant) = wat_num_len(digits, hex) else {
+        return false;
+    };
+    let mut j = mant;
+    if digits.get(j) == Some(&b'.') {
+        j += 1;
+        if let Some(frac) = wat_num_len(&digits[j..], hex) {
+            j += frac;
+        }
+    }
+    if matches!(digits.get(j).copied(), Some(c) if c == exp_lo || c == exp_hi) {
+        j += 1;
+        if j < digits.len() && (digits[j] == b'+' || digits[j] == b'-') {
+            j += 1;
+        }
+        let Some(exp) = wat_num_len(&digits[j..], false) else {
+            return false;
+        };
+        j += exp;
+    }
+    j == digits.len()
+}
+
+/// Length of a maximal WAT `num` (decimal) or `hexnum` run at the start of `s`:
+/// one digit, then digits with an optional `_` *between* two digits. Returns
+/// `None` when `s` does not start with a digit. A trailing or doubled `_` is
+/// left unconsumed, so the caller's whole-token check rejects it.
+fn wat_num_len(s: &[u8], hex: bool) -> Option<usize> {
+    let is_digit = |b: u8| {
+        if hex {
+            b.is_ascii_hexdigit()
+        } else {
+            b.is_ascii_digit()
+        }
+    };
+    if s.is_empty() || !is_digit(s[0]) {
+        return None;
+    }
+    let mut i = 1;
+    loop {
+        if i < s.len() && is_digit(s[i]) {
+            i += 1;
+        } else if i + 1 < s.len() && s[i] == b'_' && is_digit(s[i + 1]) {
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    Some(i)
 }
 
 /// Byte offsets of the start of each line (line 1 begins at offset 0).

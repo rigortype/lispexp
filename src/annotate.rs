@@ -616,7 +616,7 @@ struct HarvestProfile {
 /// The harvest profile for `dialect`, or `None` if its macros are not
 /// harvestable by the arglist-name heuristic. The Scheme family defines macros
 /// with `syntax-rules` patterns, not an arglist (a separate harvester, ADR-0031);
-/// EDN and AutoLISP have no user macros.
+/// EDN, AutoLISP, and WAT have no user macros.
 fn harvest_profile(dialect: Dialect) -> Option<HarvestProfile> {
     use Docstring::{Leading, LeadingOrLone, None as NoDoc};
     let profile = |macro_heads, doc_policy, use_declare, clojure_meta| HarvestProfile {
@@ -674,7 +674,7 @@ fn is_syntax_rules_dialect(dialect: Dialect) -> bool {
 ///   which names *and* nests the argument structure.
 ///
 /// Returns the number of specs added; `0` for dialects with no harvestable
-/// def-macro form (EDN and AutoLISP).
+/// def-macro form (EDN, AutoLISP, and WAT).
 pub fn harvest_source_for(source: &str, dialect: Dialect, reg: &mut Registry) -> usize {
     let parsed = parse(source, &Options::for_dialect(dialect));
     let mut added = 0;
@@ -1185,8 +1185,8 @@ impl Builtins {
 ///
 /// Only the high-confidence, uncontested def-forms are included; a project's
 /// long tail (project-local def-macros, contested classifications) stays with
-/// the consumer, composed on top of this core. EDN, a data-only dialect, has no
-/// definitions and returns an empty registry.
+/// the consumer, composed on top of this core. EDN, a data-only dialect, and
+/// WAT, a non-Lisp format, have no definitions and return an empty registry.
 #[must_use]
 pub fn bundled_registry(dialect: Dialect) -> Registry {
     match dialect {
@@ -1210,6 +1210,8 @@ pub fn bundled_registry(dialect: Dialect) -> Registry {
         Dialect::Islisp => islisp_builtins(),
         Dialect::AutoLisp => autolisp_builtins(),
         Dialect::Edn => Registry::new(),
+        // WAT is a non-Lisp S-expression format with no def-forms to annotate.
+        Dialect::Wat => Registry::new(),
     }
 }
 
