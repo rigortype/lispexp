@@ -126,11 +126,7 @@ impl<'a, 'o> Lexer<'a, 'o> {
                 true
             };
             if starts {
-                let cr_newline = self.opts.cr_newline;
-                while let Some(c) = self.peek() {
-                    if c == '\n' || (cr_newline && c == '\r') {
-                        break;
-                    }
+                while matches!(self.peek(), Some(c) if !self.is_line_break(c)) {
                     self.bump();
                 }
                 return Some(self.token(TokenKind::LineComment, start));
@@ -481,6 +477,10 @@ impl<'a, 'o> Lexer<'a, 'o> {
         )
     }
 
+    fn is_line_break(&self, c: char) -> bool {
+        c == '\n' || (self.opts.cr_newline && c == '\r')
+    }
+
     fn at_line_start(&self) -> bool {
         self.pos == 0
             || self.src[..self.pos].ends_with('\n')
@@ -491,13 +491,13 @@ impl<'a, 'o> Lexer<'a, 'o> {
         // Line-leading `#lang <name>` directive (Racket) and `#!` shebang.
         if self.at_line_start() {
             if self.opts.lang_line && self.rest().starts_with("#lang") {
-                while !matches!(self.peek(), Some('\n') | None) {
+                while matches!(self.peek(), Some(c) if !self.is_line_break(c)) {
                     self.bump();
                 }
                 return self.token(TokenKind::LangLine, start);
             }
             if self.opts.shebang_line && self.rest().starts_with("#!") {
-                while !matches!(self.peek(), Some('\n') | None) {
+                while matches!(self.peek(), Some(c) if !self.is_line_break(c)) {
                     self.bump();
                 }
                 return self.token(TokenKind::LineComment, start);

@@ -133,6 +133,8 @@ fn numbers_follow_the_wat_grammar() {
         "0x1.p3",
         "0x1.ap3",
         "-0x1.8P+3",
+        "0x1.",
+        "0x1.8",
         "inf",
         "-inf",
         "nan",
@@ -147,11 +149,22 @@ fn numbers_follow_the_wat_grammar() {
         "offset=1024",
         "align=4",
         "nan:canonical",
-        "0x1.8",
+        "nan:0x",
+        "nan:0x_1",
+        "0x",
+        "0x1p",
+        "0x1p1a",
+        "0x_1",
+        "0x1_.2",
+        "0x1._2",
         "1__0",
         "1_",
+        "1_e2",
         ".5",
         "1f",
+        "0X1",
+        "INF",
+        "NaN",
     ];
 
     let mut source = String::new();
@@ -253,6 +266,15 @@ fn lone_semicolon_is_an_atom_not_a_comment() {
     assert_eq!(func.head_symbol(), Some("func"));
     let items = func.items().unwrap();
     assert_eq!(items.last().and_then(Datum::as_symbol), Some(";"));
+
+    // Same when `;` immediately precedes `)` with no intervening space.
+    let parsed = parse("(module (func $f (result i32) i32.const 1;))", &wat());
+    assert!(parsed.errors.is_empty(), "{:?}", parsed.errors);
+    let func = &parsed.data[0].items().unwrap()[1];
+    assert_eq!(
+        func.items().unwrap().last().and_then(Datum::as_symbol),
+        Some(";")
+    );
 
     // `foo;bar` splits at `;` (not an idchar): `foo` then reserved `;bar`.
     let parsed = parse("foo;bar", &wat());

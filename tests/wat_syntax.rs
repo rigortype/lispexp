@@ -46,10 +46,9 @@ fn cr_only_newlines() {
 
 #[test]
 fn cr_recovery_after_unterminated_string() {
-    // The same WAT newline set drives the unterminated-string backtrack: the
-    // line-start `(c 1)` after a lone CR must be recovered, not lost.
-    let parsed = parse("(a (b \"unterminated\r(c 1)", &wat());
-    let mut found = false;
+    // The same WAT newline set drives the unterminated-string and
+    // unterminated-quoted-identifier backtrack: the line-start `(c 1)` after a
+    // lone CR must be recovered, not lost.
     fn walk(d: &lispexp::DatumKind<'_>, found: &mut bool) {
         if let lispexp::DatumKind::List { items, .. } = d {
             if items.first().and_then(|i| i.as_symbol()) == Some("c") {
@@ -60,10 +59,20 @@ fn cr_recovery_after_unterminated_string() {
             }
         }
     }
-    for d in &parsed.data {
-        walk(&d.kind, &mut found);
+    for src in [
+        "(a (b \"unterminated\r(c 1)",
+        "(a (b $\"unterminated\r(c 1)",
+    ] {
+        let parsed = parse(src, &wat());
+        let mut found = false;
+        for d in &parsed.data {
+            walk(&d.kind, &mut found);
+        }
+        assert!(
+            found,
+            "`(c 1)` after a CR break must be recovered in {src:?}"
+        );
     }
-    assert!(found, "`(c 1)` after a CR break must be recovered");
 }
 
 #[test]

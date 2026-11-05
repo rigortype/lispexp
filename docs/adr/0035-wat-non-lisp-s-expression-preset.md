@@ -14,8 +14,8 @@ fits it. But WAT shares almost none of the Lisp *reader surface*:
   tokens); treating `,` as unquote or `;` as a Lisp line comment would still
   mis-read valid WAT.
 - Its own number grammar: decimal and `0x` hexadecimal integers with optional `_`
-  separators, decimal floats with `e` exponents, hex floats with a *required* `p`
-  exponent (`0x1.8p3`), and `inf` / `nan` / `nan:0x…`.
+  separators, decimal floats with `e` exponents, hex floats with optional `.`
+  fractions and `p` exponents (`0x1.8`, `0x1.8p3`), and `inf` / `nan` / `nan:0x…`.
 - `$"name with spaces"` (quoted identifiers) is one token, which the generic atom
   scanner would split at the `"`.
 - Its own comments: `;;` line comments and nestable `(; … ;)` block comments. The

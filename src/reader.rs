@@ -794,8 +794,8 @@ fn looks_like_number(s: &str) -> bool {
 /// (ADR-0035). Used only when [`Options::wat_numbers`] is set.
 ///
 /// The WAT grammar is disjoint enough from the Lisp one to need its own shape
-/// check: optional `_` digit separators, `0x` hexadecimal integers, hexadecimal
-/// floats that *require* a `p` exponent (`0x1.8p3`), decimal `e` exponents, and
+/// check: optional `_` digit separators, `0x` hexadecimal integers and floats,
+/// binary `p` exponents on hex floats (`0x1.8p3`), decimal `e` exponents, and
 /// the float constants `inf` / `nan` / `nan:0x…`. Value is never interpreted —
 /// this is still lexical-shape-only, so range checks stay with the consumer.
 fn wat_looks_like_number(s: &str) -> bool {
@@ -809,64 +809,41 @@ fn wat_looks_like_number(s: &str) -> bool {
     if body == b"inf" || body == b"nan" {
         return true;
     }
-    if body.starts_with(b"nan:0x") {
-        let payload = &body[6..];
-        return !payload.is_empty()
-            && wat_num_len(payload, true).is_some_and(|n| n == payload.len());
-    }
-    if body.starts_with(b"0x") {
-        let hex = &body[2..];
-        let Some(mant) = wat_num_len(hex, true) else {
-            return false;
-        };
-        let mut j = mant;
-        let mut has_dot = false;
-        if hex.get(j) == Some(&b'.') {
-            has_dot = true;
-            j += 1;
-            if let Some(frac) = wat_num_len(&hex[j..], true) {
-                j += frac;
-            }
-        }
-        let has_exp = matches!(hex.get(j).copied(), Some(b'p' | b'P'));
-        if has_exp {
-            j += 1;
-            if j < hex.len() && (hex[j] == b'+' || hex[j] == b'-') {
-                j += 1;
-            }
-            let Some(exp) = wat_num_len(&hex[j..], false) else {
-                return false;
-            };
-            j += exp;
-        }
-        // A hexadecimal *float* needs the `p` exponent; `0x1.8` is not a
-        // literal (the grammar only allows a dot as part of `hexfloat`).
-        return j == hex.len() && (!has_dot || has_exp);
+    if let Some(payload) = body.strip_prefix(b"nan:0x") {
+        return wat_num_len(payload, true) == Some(payload.len());
     }
 
-    // Decimal integer or float: `num`, `num.`, `num.frac`, each with an
-    // optional `e`/`E` exponent.
-    let Some(mant) = wat_num_len(body, false) else {
+    // Integer or float: decimal (`num`, `.`, `e`/`E` exponent) or `0x`
+    // hexadecimal (`hexnum`, `.`, `p`/`P` exponent). In both bases the exponent
+    // itself is a decimal `num` (`hexfloat` in the WebAssembly spec allows an
+    // optional `.` fraction and an optional `p`/`P` exponent, mirroring
+    // `float`).
+    let (digits, hex, exp_lo, exp_hi) = if let Some(hex) = body.strip_prefix(b"0x") {
+        (hex, true, b'p', b'P')
+    } else {
+        (body, false, b'e', b'E')
+    };
+    let Some(mant) = wat_num_len(digits, hex) else {
         return false;
     };
     let mut j = mant;
-    if body.get(j) == Some(&b'.') {
+    if digits.get(j) == Some(&b'.') {
         j += 1;
-        if let Some(frac) = wat_num_len(&body[j..], false) {
+        if let Some(frac) = wat_num_len(&digits[j..], hex) {
             j += frac;
         }
     }
-    if matches!(body.get(j).copied(), Some(b'e' | b'E')) {
+    if matches!(digits.get(j).copied(), Some(c) if c == exp_lo || c == exp_hi) {
         j += 1;
-        if j < body.len() && (body[j] == b'+' || body[j] == b'-') {
+        if j < digits.len() && (digits[j] == b'+' || digits[j] == b'-') {
             j += 1;
         }
-        let Some(exp) = wat_num_len(&body[j..], false) else {
+        let Some(exp) = wat_num_len(&digits[j..], false) else {
             return false;
         };
         j += exp;
     }
-    j == body.len()
+    j == digits.len()
 }
 
 /// Length of a maximal WAT `num` (decimal) or `hexnum` run at the start of `s`:

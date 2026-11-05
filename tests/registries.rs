@@ -141,7 +141,13 @@ fn edn_has_no_definitions() {
 
 #[test]
 fn wat_has_no_definitions() {
-    assert!(bundled_registry(Dialect::Wat).is_empty());
+    let mut reg = bundled_registry(Dialect::Wat);
+    assert!(reg.is_empty());
+    assert_eq!(
+        lispexp::annotate::harvest_source_for("(module (func $f))", Dialect::Wat, &mut reg),
+        0
+    );
+    assert!(reg.is_empty());
 }
 
 #[test]
