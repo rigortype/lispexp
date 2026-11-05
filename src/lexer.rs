@@ -114,12 +114,27 @@ impl<'a, 'o> Lexer<'a, 'o> {
             }
         }
 
-        // Line comment.
+        // Line comment. WAT requires the comment character twice (`;;`); a lone
+        // `;` is an atom, not a comment that would swallow the rest of the line.
         if c == self.opts.line_comment {
-            while !matches!(self.peek(), Some('\n') | None) {
-                self.bump();
+            let doubled = self.opts.line_comment_double;
+            let starts = if doubled {
+                let mut chars = self.rest().chars();
+                chars.next() == Some(self.opts.line_comment)
+                    && chars.next() == Some(self.opts.line_comment)
+            } else {
+                true
+            };
+            if starts {
+                let cr_newline = self.opts.cr_newline;
+                while let Some(c) = self.peek() {
+                    if c == '\n' || (cr_newline && c == '\r') {
+                        break;
+                    }
+                    self.bump();
+                }
+                return Some(self.token(TokenKind::LineComment, start));
             }
-            return Some(self.token(TokenKind::LineComment, start));
         }
 
         // Backtick long string (Janet).
@@ -169,6 +184,12 @@ impl<'a, 'o> Lexer<'a, 'o> {
         // Hash-led reader syntax.
         if c == '#' && self.opts.hash_syntax {
             return Some(self.lex_hash(start));
+        }
+
+        // WAT quoted identifier `$"name with spaces"` — one verbatim Atom
+        // including the `$` and the quotes (ADR-0035).
+        if c == '$' && self.opts.quoted_identifiers && self.rest().starts_with("$\"") {
+            return Some(self.lex_quoted_identifier(start));
         }
 
         // Character literal with a bare backslash lead (Clojure `\a`; Phel `\a`
@@ -403,7 +424,7 @@ impl<'a, 'o> Lexer<'a, 'o> {
         // A legitimately terminated string (even a multiline one holding a
         // line-start `(`) never reaches here, so this only affects the error
         // path.
-        if let Some(cut) = next_line_start_paren(&self.src[content_start..]) {
+        if let Some(cut) = next_line_start_paren(&self.src[content_start..], self.opts.cr_newline) {
             self.pos = content_start + cut;
         }
         self.token(TokenKind::Unterminated(UnterminatedKind::Str), start)
@@ -438,8 +459,32 @@ impl<'a, 'o> Lexer<'a, 'o> {
         }
     }
 
+    /// Lex a WAT quoted identifier `$"name"` (ADR-0035). The quoted name may
+    /// contain spaces and other characters that would otherwise end an atom, so
+    /// the whole form is emitted as one verbatim [`TokenKind::Atom`]. An
+    /// unterminated quoted identifier is reported as
+    /// [`UnterminatedKind::QuotedIdentifier`] and backtracks to the likely next
+    /// top-level form, like [`Self::lex_string`].
+    fn lex_quoted_identifier(&mut self, start: usize) -> Token {
+        let content_start = start + 2; // past `$` and the opening quote
+        self.bump(); // '$'
+        self.bump(); // '"'
+        if self.consume_until_unescaped('"') {
+            return self.token(TokenKind::Atom, start);
+        }
+        if let Some(cut) = next_line_start_paren(&self.src[content_start..], self.opts.cr_newline) {
+            self.pos = content_start + cut;
+        }
+        self.token(
+            TokenKind::Unterminated(UnterminatedKind::QuotedIdentifier),
+            start,
+        )
+    }
+
     fn at_line_start(&self) -> bool {
-        self.pos == 0 || self.src[..self.pos].ends_with('\n')
+        self.pos == 0
+            || self.src[..self.pos].ends_with('\n')
+            || (self.opts.cr_newline && self.src[..self.pos].ends_with('\r'))
     }
 
     fn lex_hash(&mut self, start: usize) -> Token {
@@ -910,18 +955,28 @@ impl<'a, 'o> Iterator for Lexer<'a, 'o> {
 
 /// In `s` (the content just past an unterminated string's opening quote), find
 /// the byte offset of the first line-start `(` — the `(` that is the first
-/// non-whitespace character of a line after a `\n`. Returns `None` if no such
-/// line exists (then the unterminated string keeps its to-EOF span). Used only
-/// on the error path to let the reader resync at the likely next top-level form
-/// (R5).
-fn next_line_start_paren(s: &str) -> Option<usize> {
+/// non-whitespace character of a line after a line break. A break is `\n`, or
+/// (when `cr_newline` is set, WAT) a lone `\r`. Returns `None` if no such line
+/// exists (then the unterminated string keeps its to-EOF span). Used only on the
+/// error path to let the reader resync at the likely next top-level form (R5).
+fn next_line_start_paren(s: &str, cr_newline: bool) -> Option<usize> {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\n' {
-            // Skip leading whitespace on the next line.
+        let is_break = bytes[i] == b'\n' || (cr_newline && bytes[i] == b'\r');
+        if is_break {
+            // Step past a CRLF pair once, then skip leading whitespace on the
+            // next line (stopping at the next break so a blank line is not a
+            // match).
             let mut j = i + 1;
-            while j < bytes.len() && bytes[j] != b'\n' && bytes[j].is_ascii_whitespace() {
+            if cr_newline && bytes[i] == b'\r' && j < bytes.len() && bytes[j] == b'\n' {
+                j += 1;
+            }
+            while j < bytes.len()
+                && bytes[j] != b'\n'
+                && !(cr_newline && bytes[j] == b'\r')
+                && bytes[j].is_ascii_whitespace()
+            {
                 j += 1;
             }
             if j < bytes.len() && bytes[j] == b'(' {

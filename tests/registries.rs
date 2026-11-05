@@ -140,6 +140,11 @@ fn edn_has_no_definitions() {
 }
 
 #[test]
+fn wat_has_no_definitions() {
+    assert!(bundled_registry(Dialect::Wat).is_empty());
+}
+
+#[test]
 fn consumer_can_extend_bundled_core() {
     use lispexp::annotate::{Confidence, Docstring, FormSpec, Role};
     // The bundled core is composable: a consumer overrides/extends it.

@@ -18,6 +18,7 @@ fn options_for(path: &str) -> Options {
         Some("lisp" | "cl") => Options::common_lisp(),
         Some("rkt") => Options::racket(),
         Some("scm" | "ss") => Options::scheme_superset(),
+        Some("wat" | "wast") => Options::wat(),
         _ => Options::for_dialect(Dialect::Scheme),
     }
 }
@@ -27,6 +28,10 @@ fn main() {
         ("square.scm", "(define (square x) (* x x))"),
         ("core.clj", "(defn square [x] (* x x))"),
         ("init.el", "(defun square (x) (* x x))"),
+        (
+            "add.wat",
+            "(module (func $add (param i32 i32) (result i32)))",
+        ),
     ];
 
     for (path, source) in inputs {

@@ -233,15 +233,25 @@ Implemented dialects: **Scheme** (`Options::scheme`), **Clojure** (`Options::clo
 **Racket** (`Options::racket`), **Janet** (`Options::janet`), **Hy** (`Options::hy`),
 **AutoLISP** (`Options::autolisp`), **Guile** (`Options::guile`), **Phel**
 (`Options::phel`), **Fennel** (`Options::fennel`), **LFE** (`Options::lfe`), and
-**ISLisp** (`Options::islisp`).
+**ISLisp** (`Options::islisp`). Non-Lisp format: **WAT**, the WebAssembly text format
+(`Options::wat`, ADR-0035).
+
+WAT is a single preset outside the Lisp families: only `()` lists and atoms remain,
+Lisp reader macros are turned off (`'`/`#`/`|`/`\` are WAT idchars, not reader
+glyphs), line comments are `;;` (`line_comment_double`; a lone `;` is an atom) and
+may end at any of WAT's newline forms LF/CR/CRLF (`cr_newline`), and WAT-specific
+settings classify its numbers (`wat_numbers`) and quoted identifiers
+(`quoted_identifiers`). It is covered by targeted tests (`tests/wat.rs`,
+`tests/wat_syntax.rs`); the reader records the module tree — including
+`(@id …)` annotations as lists — and leaves validation to the consumer.
 
 Scheme, Clojure, Common Lisp, Emacs Lisp, and Racket are each exercised by a
 real-world corpus under `tests/corpus/` — chibi-scheme (610 files), clojure/clojure
 (142), cl-ppcre (23), lem (627 CL files), magit (49 elisp files), and typed-racket
 (1872 files) — all parse with zero errors. Janet, Hy, AutoLISP, Guile, Phel, Fennel,
-LFE, and ISLisp are covered by targeted unit tests (`tests/janet_hy_autolisp.rs`,
+LFE, ISLisp, and WAT are covered by targeted unit tests (`tests/janet_hy_autolisp.rs`,
 `tests/guile.rs`, `tests/phel.rs`, `tests/fennel.rs`, `tests/lfe.rs`,
-`tests/islisp.rs`) rather than a corpus.
+`tests/islisp.rs`, `tests/wat.rs`) rather than a corpus.
 
 Racket notes: the `#lang <name>` line is captured into `Parsed.lang_line` and not
 otherwise acted on (ADR-0012); `#:foo` keywords, `[]`/`{}` as code lists, `#'` syntax,

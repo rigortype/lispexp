@@ -85,4 +85,6 @@ pub enum UnterminatedKind {
     CharSet,
     /// An unterminated Gauche/Mosh regexp literal (`#/...` or `` #"..." ``).
     Regex,
+    /// An unterminated WAT quoted identifier (`$"...`).
+    QuotedIdentifier,
 }

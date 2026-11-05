@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `Dialect::Wat` / `Options::wat()` — read the **WebAssembly text format**, the crate's first non-Lisp S-expression surface (ADR-0035). The preset turns every Lisp reader macro off (`'`, `` ` ``, `#`, `|`, and `\` are WAT identifier characters), reads `;;` line comments (a lone `;` is an atom) and nestable `(; … ;)` block comments, and records `(module …)` / instruction lists as ordinary lists and symbols. `.wat` and `.wast` are registered with `detect`/`Dialect::from_extension`.
+- `Options::wat_numbers`, `Options::quoted_identifiers`, `Options::line_comment_double`, and `Options::cr_newline` — the WAT-specific lexical settings behind that preset: classify atoms by WAT's numeric grammar (`0x2A`, `1_000`, `1.5`, `0x1.8p3`, `inf`, `nan:0x…`); read `$"name with spaces"` as one verbatim identifier; start a line comment only on a doubled comment character (`;;`); and treat a lone `\r` as a tokenization line break (WAT's newline is LF/CR/CRLF). All default to `false`, so no Lisp dialect's classification or comments change.
+- `UnterminatedKind::QuotedIdentifier` — the EOF lexical state for an unterminated WAT `$"…"` (ADR-0015); not `UnterminatedKind::Str`.
+
 ## [0.7.0] - 2026-07-04
 
 Phel reader faithfulness, plus an opt-in for round-trip consumers. Three Phel constructs that produced a structurally-wrong tree — a `;` inside a symbol, the `|(…)` short anonymous function, and PHP fully-qualified names — now read the way Phel's own lexer reads them. Validated against the phel-lang source: it goes from 2 structural parse errors to 0, with 648 PHP FQNs and 7 `|(…)` forms now correctly structured. This release also seeds real-code corpus tests for every previously thin-tested dialect (Phel, ISLisp, AutoLISP, Janet, Fennel, Hy, LFE) — an internal quality gate, no API change.

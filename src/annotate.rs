@@ -1185,8 +1185,8 @@ impl Builtins {
 ///
 /// Only the high-confidence, uncontested def-forms are included; a project's
 /// long tail (project-local def-macros, contested classifications) stays with
-/// the consumer, composed on top of this core. EDN, a data-only dialect, has no
-/// definitions and returns an empty registry.
+/// the consumer, composed on top of this core. EDN, a data-only dialect, and
+/// WAT, a non-Lisp format, have no definitions and return an empty registry.
 #[must_use]
 pub fn bundled_registry(dialect: Dialect) -> Registry {
     match dialect {
@@ -1210,6 +1210,8 @@ pub fn bundled_registry(dialect: Dialect) -> Registry {
         Dialect::Islisp => islisp_builtins(),
         Dialect::AutoLisp => autolisp_builtins(),
         Dialect::Edn => Registry::new(),
+        // WAT is a non-Lisp S-expression format with no def-forms to annotate.
+        Dialect::Wat => Registry::new(),
     }
 }
 

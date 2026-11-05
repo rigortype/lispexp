@@ -703,6 +703,13 @@ fn classify_atom<'a>(text: &'a str, opts: &Options) -> DatumKind<'a> {
     if opts.keyword_colon && text.starts_with(':') {
         return DatumKind::Keyword(text);
     }
+    if opts.wat_numbers {
+        return if wat_looks_like_number(text) {
+            DatumKind::Number(text)
+        } else {
+            DatumKind::Symbol(text)
+        };
+    }
     if looks_like_number(text) {
         return DatumKind::Number(text);
     }
@@ -781,6 +788,113 @@ fn looks_like_number(s: &str) -> bool {
         prev_exp_marker = is_exp_marker;
     }
     true
+}
+
+/// Whether `s` matches the WebAssembly text (WAT) numeric grammar
+/// (ADR-0035). Used only when [`Options::wat_numbers`] is set.
+///
+/// The WAT grammar is disjoint enough from the Lisp one to need its own shape
+/// check: optional `_` digit separators, `0x` hexadecimal integers, hexadecimal
+/// floats that *require* a `p` exponent (`0x1.8p3`), decimal `e` exponents, and
+/// the float constants `inf` / `nan` / `nan:0x…`. Value is never interpreted —
+/// this is still lexical-shape-only, so range checks stay with the consumer.
+fn wat_looks_like_number(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut i = 0;
+    if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+        i += 1;
+    }
+    let body = &b[i..];
+
+    if body == b"inf" || body == b"nan" {
+        return true;
+    }
+    if body.starts_with(b"nan:0x") {
+        let payload = &body[6..];
+        return !payload.is_empty()
+            && wat_num_len(payload, true).is_some_and(|n| n == payload.len());
+    }
+    if body.starts_with(b"0x") {
+        let hex = &body[2..];
+        let Some(mant) = wat_num_len(hex, true) else {
+            return false;
+        };
+        let mut j = mant;
+        let mut has_dot = false;
+        if hex.get(j) == Some(&b'.') {
+            has_dot = true;
+            j += 1;
+            if let Some(frac) = wat_num_len(&hex[j..], true) {
+                j += frac;
+            }
+        }
+        let has_exp = matches!(hex.get(j).copied(), Some(b'p' | b'P'));
+        if has_exp {
+            j += 1;
+            if j < hex.len() && (hex[j] == b'+' || hex[j] == b'-') {
+                j += 1;
+            }
+            let Some(exp) = wat_num_len(&hex[j..], false) else {
+                return false;
+            };
+            j += exp;
+        }
+        // A hexadecimal *float* needs the `p` exponent; `0x1.8` is not a
+        // literal (the grammar only allows a dot as part of `hexfloat`).
+        return j == hex.len() && (!has_dot || has_exp);
+    }
+
+    // Decimal integer or float: `num`, `num.`, `num.frac`, each with an
+    // optional `e`/`E` exponent.
+    let Some(mant) = wat_num_len(body, false) else {
+        return false;
+    };
+    let mut j = mant;
+    if body.get(j) == Some(&b'.') {
+        j += 1;
+        if let Some(frac) = wat_num_len(&body[j..], false) {
+            j += frac;
+        }
+    }
+    if matches!(body.get(j).copied(), Some(b'e' | b'E')) {
+        j += 1;
+        if j < body.len() && (body[j] == b'+' || body[j] == b'-') {
+            j += 1;
+        }
+        let Some(exp) = wat_num_len(&body[j..], false) else {
+            return false;
+        };
+        j += exp;
+    }
+    j == body.len()
+}
+
+/// Length of a maximal WAT `num` (decimal) or `hexnum` run at the start of `s`:
+/// one digit, then digits with an optional `_` *between* two digits. Returns
+/// `None` when `s` does not start with a digit. A trailing or doubled `_` is
+/// left unconsumed, so the caller's whole-token check rejects it.
+fn wat_num_len(s: &[u8], hex: bool) -> Option<usize> {
+    let is_digit = |b: u8| {
+        if hex {
+            b.is_ascii_hexdigit()
+        } else {
+            b.is_ascii_digit()
+        }
+    };
+    if s.is_empty() || !is_digit(s[0]) {
+        return None;
+    }
+    let mut i = 1;
+    loop {
+        if i < s.len() && is_digit(s[i]) {
+            i += 1;
+        } else if i + 1 < s.len() && s[i] == b'_' && is_digit(s[i + 1]) {
+            i += 2;
+        } else {
+            break;
+        }
+    }
+    Some(i)
 }
 
 /// Byte offsets of the start of each line (line 1 begins at offset 0).

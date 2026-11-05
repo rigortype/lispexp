@@ -135,3 +135,12 @@ fn unterminated_char_set_is_char_set_kind() {
 fn unterminated_regex_slash_is_regex_kind() {
     assert_unterminated("#/re", &Options::scheme_superset(), UnterminatedKind::Regex);
 }
+
+#[test]
+fn unterminated_wat_quoted_identifier_is_quoted_identifier_kind() {
+    assert_unterminated(
+        r#"$"open"#,
+        &Options::wat(),
+        UnterminatedKind::QuotedIdentifier,
+    );
+}

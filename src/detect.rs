@@ -89,6 +89,7 @@ impl Dialect {
             Fennel => &["fnl"],
             Lfe => &["lfe"],
             Islisp => &[],
+            Wat => &["wat", "wast"],
         }
     }
 
@@ -116,6 +117,7 @@ impl Dialect {
             "lfe" => &[Lfe],
             "cl" | "lisp" => &[CommonLisp],
             "lsp" => &[CommonLisp, AutoLisp],
+            "wat" | "wast" => &[Wat],
             _ => &[],
         }
     }
